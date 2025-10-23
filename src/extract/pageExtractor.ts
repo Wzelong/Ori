@@ -1,44 +1,23 @@
-export interface PageData {
-  url: string
-  title: string
-  content: string
-  favicon?: string
-  metadata?: Record<string, string>
-}
+export async function extractPageContent() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-export async function extractPageContent(): Promise<PageData> {
-  const title = document.title
-  const url = window.location.href
-
-  const content = extractMainContent()
-
-  const favicon = extractFavicon()
-
-  return {
-    url,
-    title,
-    content,
-    favicon,
-  }
-}
-
-function extractMainContent(): string {
-  const article = document.querySelector('article')
-  if (article) {
-    return article.innerText.trim()
+  if (!tab.id) {
+    throw new Error('No active tab found');
   }
 
-  const main = document.querySelector('main')
-  if (main) {
-    return main.innerText.trim()
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => ({
+      title: document.title,
+      url: window.location.href,
+      text: document.body.innerText
+    })
+  });
+
+  if (!results[0]?.result) {
+    throw new Error('Failed to extract content');
   }
 
-  return document.body.innerText.trim()
+  return results[0].result;
 }
 
-function extractFavicon(): string | undefined {
-  const iconLink = document.querySelector<HTMLLinkElement>(
-    'link[rel~="icon"]'
-  )
-  return iconLink?.href
-}

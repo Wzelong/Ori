@@ -31,17 +31,12 @@ Trace is a Chrome extension that leverages Gemini Nano's built-in AI APIs (Promp
 ```
 trace/
 ├─ src/
-│  ├─ background/       # Service worker (AI processing, storage)
-│  ├─ content/          # Content scripts (DOM extraction)
-│  ├─ popup/            # Quick access popup UI
-│  ├─ sidepanel/        # Main panel UI
-│  ├─ options/          # Settings page
-│  ├─ components/ui/    # shadcn/ui components
-│  ├─ db/               # Dexie schema & database
-│  ├─ extract/          # Page/video parsing utilities
-│  ├─ rag/              # Retrieval & summarization logic
-│  ├─ types/            # TypeScript definitions
-│  └─ utils/            # Common helpers
+│  ├─ background/       # Service worker
+│  ├─ popup/            # Popup UI
+│  ├─ sidepanel/        # Side panel UI
+│  ├─ options/          # Options page
+│  ├─ components/ui/    # shadcn/ui components (as needed)
+│  └─ styles/           # Tailwind CSS
 ├─ public/icons/        # Extension icons
 └─ manifest.config.ts   # Chrome extension manifest
 ```
@@ -96,11 +91,9 @@ To use Chrome's built-in AI features:
 ### Key Files
 
 - `src/background/background.ts` - Service worker entry point
-- `src/content/contentScript.ts` - Content script for page extraction
-- `src/db/db.ts` - Database schema and models
-- `src/rag/summarizer.ts` - AI summarization logic
-- `src/rag/promptAPI.ts` - AI prompt interface
-- `src/rag/retrieval.ts` - Knowledge base search
+- `src/popup/App.tsx` - Popup UI
+- `src/sidepanel/App.tsx` - Side panel UI
+- `src/options/App.tsx` - Options page
 
 ## License
 
