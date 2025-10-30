@@ -43,4 +43,13 @@ export default defineManifest({
     default_path: 'src/sidepanel/index.html',
   },
   options_page: 'src/options/index.html',
+  web_accessible_resources: [
+    {
+      resources: ['*.wasm', '*.mjs'],
+      matches: ['<all_urls>'],
+    },
+  ],
+  content_security_policy: {
+    extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+  },
 })

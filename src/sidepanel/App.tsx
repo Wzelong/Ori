@@ -1,34 +1,48 @@
-import { useState } from 'react';
-import { processPage } from '../process/pipeline';
+import { useState, useEffect } from 'react';
+import { runPipeline } from '../pipeline/pipeline';
+import { getEmbedding } from '../llm/embeddings';
 import { Button } from '@/components/ui/button';
-import type { ProcessedPage } from '../types';
+import type { PageResult } from '../types/schema';
 
 export default function App() {
-  const [result, setResult] = useState<ProcessedPage | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [modelLoading, setModelLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
+  const [result, setResult] = useState<PageResult | null>(null);
   const [error, setError] = useState<string>('');
 
+  useEffect(() => {
+    getEmbedding('warmup')
+      .then(() => setModelLoading(false))
+      .catch((err) => {
+        setError(err.message);
+        setModelLoading(false);
+      });
+  }, []);
+
   const handleProcess = async () => {
-    setLoading(true);
+    setProcessing(true);
     setError('');
     setResult(null);
 
     try {
-      const processed = await processPage();
-      setResult(processed);
+      const pageResult = await runPipeline();
+      setResult(pageResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Processing failed');
-      console.error('Processing error:', err);
     } finally {
-      setLoading(false);
+      setProcessing(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="space-y-4">
-        <Button onClick={handleProcess} disabled={loading} variant="outline">
-          {loading ? 'Processing...' : 'Process'}
+        {modelLoading && (
+          <p className="text-xs text-muted-foreground">Loading model...</p>
+        )}
+
+        <Button onClick={handleProcess} disabled={modelLoading || processing} variant="outline">
+          {processing ? 'Processing...' : 'Process'}
         </Button>
 
         {error && (
@@ -58,9 +72,36 @@ export default function App() {
                 ))}
               </div>
             </div>
+
+            {result.topicEmbeddings && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Topic Embeddings:</p>
+                <div className="space-y-2">
+                  {result.topics.map((topic, i) => (
+                    <div key={i} className="p-3 border rounded-md bg-muted/20">
+                      <p className="text-xs font-medium mb-1">{topic}</p>
+                      <p className="text-xs text-muted-foreground font-mono">
+                        [{result.topicEmbeddings![i].slice(0, 5).map(v => v.toFixed(3)).join(', ')}, ...] ({result.topicEmbeddings![i].length}d)
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {result.contentEmbedding && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-2">Content Embedding:</p>
+                <div className="p-3 border rounded-md bg-muted/20">
+                  <p className="text-xs text-muted-foreground font-mono">
+                    [{result.contentEmbedding.slice(0, 5).map(v => v.toFixed(3)).join(', ')}, ...] ({result.contentEmbedding.length}d)
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
-  )
+  );
 }
