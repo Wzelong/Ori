@@ -42,3 +42,41 @@ export async function computeSimilarity(embeddings: Tensor): Promise<number[][]>
   const scores = await matmul(embeddings, embeddings.transpose(1, 0));
   return scores.tolist() as number[][];
 }
+
+export async function computeSimilarityBatch(embedding: number[], otherEmbeddings: number[][]): Promise<number[]> {
+  const allEmbeddings = [embedding, ...otherEmbeddings];
+  const tensor = new Tensor('float32', allEmbeddings.flat(), [allEmbeddings.length, embedding.length]);
+  const similarityMatrix = await computeSimilarity(tensor);
+  return similarityMatrix[0].slice(1);
+}
+
+export function arrayToArrayBuffer(arr: number[]): ArrayBuffer {
+  return new Float32Array(arr).buffer;
+}
+
+export function arrayBufferToArray(buf: ArrayBuffer): number[] {
+  return Array.from(new Float32Array(buf));
+}
+
+export async function storeVector(
+  db: any,
+  ownerType: 'item' | 'topic',
+  ownerId: string,
+  embedding: number[]
+) {
+  await db.vectors.put({
+    ownerType,
+    ownerId,
+    buf: arrayToArrayBuffer(embedding),
+    createdAt: Date.now()
+  });
+}
+
+export async function loadVector(
+  db: any,
+  ownerType: 'item' | 'topic',
+  ownerId: string
+): Promise<number[] | null> {
+  const row = await db.vectors.get([ownerType, ownerId]);
+  return row ? arrayBufferToArray(row.buf) : null;
+}

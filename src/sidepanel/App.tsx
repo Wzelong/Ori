@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { runPipeline } from '../pipeline/pipeline';
+import { runPipeline } from '../services/pipeline';
 import { getEmbedding } from '../llm/embeddings';
+import { clearDatabase } from '../db/database';
 import { Button } from '@/components/ui/button';
 import type { PageResult } from '../types/schema';
 
@@ -34,6 +35,18 @@ export default function App() {
     }
   };
 
+  const handleClearDB = async () => {
+    if (!confirm('Clear entire database? This cannot be undone.')) return;
+
+    try {
+      await clearDatabase();
+      setResult(null);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear database');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="space-y-4">
@@ -41,9 +54,14 @@ export default function App() {
           <p className="text-xs text-muted-foreground">Loading model...</p>
         )}
 
-        <Button onClick={handleProcess} disabled={modelLoading || processing} variant="outline">
-          {processing ? 'Processing...' : 'Process'}
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleProcess} disabled={modelLoading || processing} variant="outline">
+            {processing ? 'Processing...' : 'Process'}
+          </Button>
+          <Button onClick={handleClearDB} disabled={processing} variant="outline">
+            Clear DB
+          </Button>
+        </div>
 
         {error && (
           <p className="text-sm text-destructive">{error}</p>

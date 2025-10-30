@@ -23,7 +23,7 @@ export interface Item {
   title: string;
   summary: string;
   link: string;
-  addedAt: number;
+  createdAt: number;
 }
 
 export interface ItemTopic {
@@ -33,15 +33,15 @@ export interface ItemTopic {
 
 export interface TopicEdge {
   id: string;
-  src: string;       // Topic.id
-  dst: string;       // Topic.id
+  src: string;
+  dst: string;
   type: EdgeType;
-  weight?: number;   // co-occurrence count (for related_to)
+  similarity: number;
   createdAt: number;
 }
 
 export interface VectorRow {
-  ownerType: 'item' | 'chunk' | 'topic';
+  ownerType: 'item' | 'topic';
   ownerId: string;
   buf: ArrayBuffer;
   createdAt: number;

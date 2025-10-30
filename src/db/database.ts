@@ -21,7 +21,7 @@ export class GraphDB extends Dexie {
       items: `
         id,
         &link,
-        addedAt
+        createdAt
       `,
       item_topic: `
         &[itemId+topicId],
@@ -47,3 +47,14 @@ export class GraphDB extends Dexie {
 }
 
 export const db = new GraphDB();
+
+export async function clearDatabase() {
+  await db.transaction('rw', [db.items, db.topics, db.item_topic, db.topic_edges, db.vectors], async () => {
+    await db.items.clear();
+    await db.topics.clear();
+    await db.item_topic.clear();
+    await db.topic_edges.clear();
+    await db.vectors.clear();
+  });
+  console.log('[db] Database cleared');
+}
