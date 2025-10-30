@@ -1,15 +1,25 @@
 import { db } from '../db/database';
 import { generateText } from '../llm/languageModel';
 import { computeSimilarity, storeVector, loadVector } from '../llm/embeddings';
-import type { PageResult, Topic, Item } from '../types/schema';
+import type { PageResult, Topic, Item, TopicEdge } from '../types/schema';
 import { Tensor } from '@huggingface/transformers';
 
-const TOPIC_MERGE_THRESHOLD = 0.92;    // high: only merge near-duplicates
-const PARENT_MIN_SIMILARITY = 0.75;    // moderate: parent must be related
-const RELATED_MIN_SIMILARITY = 0.70;   // lower: capture looser associations
+const TOPIC_MERGE_THRESHOLD = 0.92;
+const PARENT_MIN_SIMILARITY = 0.75;
+const RELATED_MIN_SIMILARITY = 0.70;
 
-// BFS to detect cycles in broader_than edges (prevents circular hierarchies)
-async function hasPath(from: string, to: string): Promise<boolean> {
+type EdgeData = Omit<TopicEdge, 'id' | 'createdAt'>;
+type Neighbor = { topic: Topic; similarity: number };
+
+type GraphContext = {
+  existingTopics: Topic[];
+  createdTopics: Array<{ topic: Topic; row: number }>;
+  allEdges: EdgeData[];
+  matrix: number[][];
+  colMap: Map<string, number>;
+};
+
+function hasPath(from: string, to: string, edges: EdgeData[]): boolean {
   const visited = new Set<string>();
   const queue = [from];
 
@@ -19,107 +29,88 @@ async function hasPath(from: string, to: string): Promise<boolean> {
     if (visited.has(current)) continue;
     visited.add(current);
 
-    const edges = await db.topic_edges
-      .where('[src+dst+type]')
-      .between([current, '', ''], [current, '\uffff', '\uffff'])
-      .toArray();
-
-    for (const edge of edges) {
-      if (edge.type === 'broader_than') {
-        queue.push(edge.dst);
-      }
-    }
+    edges.forEach(e => {
+      if (e.src === current && e.type === 'broader_than') queue.push(e.dst);
+    });
   }
   return false;
 }
 
-// Insert item if new, returns null if already exists
-async function resolveItem(title: string, summary: string, link: string): Promise<Item | null> {
-  const existing = await db.items.where('link').equals(link).first();
-  if (existing) return null;
-
-  const id = crypto.randomUUID();
-  const item: Item = {
-    id,
-    title,
-    summary,
-    link,
-    createdAt: Date.now()
-  };
-  await db.items.add(item);
-  return item;
+function findBestMatch(similarities: number[]): { index: number; similarity: number } {
+  let bestIdx = -1, bestSim = 0;
+  for (let i = 0; i < similarities.length; i++) {
+    if (similarities[i] > bestSim) {
+      bestSim = similarities[i];
+      bestIdx = i;
+    }
+  }
+  return { index: bestIdx, similarity: bestSim };
 }
 
-// Resolve topics with semantic deduplication (>0.92 threshold)
-async function resolveTopics(
+async function selectParents(topicLabel: string, candidates: string[]): Promise<string[]> {
+  if (candidates.length === 0) return [];
+
+  const prompt = `Given a new topic "${topicLabel}", select 0-2 parent topics that are broader concepts.
+
+Candidates: ${candidates.join(', ')}
+
+Return JSON array of selected labels (0-2 items):
+["label1", "label2"] or []`;
+
+  const json = await generateText(prompt, {
+    systemPrompt: 'You select parent topics that represent broader concepts. Return valid JSON array only.',
+    schema: { type: 'array', items: { type: 'string' }, maxItems: 2 }
+  });
+
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed.slice(0, 2).map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+
+function resolveTopics(
   topics: string[],
-  embeddings: number[][],
   existingTopics: Topic[],
   similarityMatrix: number[][]
-): Promise<{ resolved: Topic[]; newTopicIndices: Map<string, number> }> {
+): { resolved: Topic[]; newIndices: Map<string, number> } {
   const resolved: Topic[] = [];
-  const newTopicIndices = new Map<string, number>();
+  const newIndices = new Map<string, number>();
 
-  for (let i = 0; i < topics.length; i++) {
-    const label = topics[i];
-    const embedding = embeddings[i];
-
-    const exactMatch = await db.topics.where('label').equals(label).first();
+  topics.forEach((label, i) => {
+    const exactMatch = existingTopics.find(t => t.label === label);
     if (exactMatch) {
-      await db.topics.update(exactMatch.id, { uses: exactMatch.uses + 1 });
       resolved.push({ ...exactMatch, uses: exactMatch.uses + 1 });
-      continue;
+      return;
     }
 
     if (existingTopics.length === 0) {
-      const id = crypto.randomUUID();
-      const newTopic: Topic = {
-        id,
-        label,
-        uses: 1,
-        createdAt: Date.now()
-      };
-      await db.topics.add(newTopic);
-      await storeVector(db, 'topic', id, embedding);
+      const newTopic: Topic = { id: crypto.randomUUID(), label, uses: 1, createdAt: Date.now() };
       resolved.push(newTopic);
-      continue;
+      newIndices.set(newTopic.id, i);
+      return;
     }
 
     const similarities = similarityMatrix[i].slice(topics.length);
-    let bestSimilarity = 0;
-    let bestMatchIndex = -1;
+    const best = findBestMatch(similarities);
 
-    for (let j = 0; j < similarities.length; j++) {
-      if (similarities[j] > bestSimilarity) {
-        bestSimilarity = similarities[j];
-        bestMatchIndex = j;
-      }
-    }
+    console.log(`[resolve] "${label}" best: ${best.similarity.toFixed(3)} (threshold: ${TOPIC_MERGE_THRESHOLD})`);
 
-    console.log(`[resolve] "${label}" best match: ${bestSimilarity.toFixed(3)} (threshold: ${TOPIC_MERGE_THRESHOLD})`);
-    if (bestMatchIndex >= 0 && bestSimilarity > TOPIC_MERGE_THRESHOLD) {
-      const bestMatch = existingTopics[bestMatchIndex];
-      console.log(`[resolve] Merged "${label}" → "${bestMatch.label}"`);
-      await db.topics.update(bestMatch.id, { uses: bestMatch.uses + 1 });
-      resolved.push({ ...bestMatch, uses: bestMatch.uses + 1 });
+    if (best.index >= 0 && best.similarity > TOPIC_MERGE_THRESHOLD) {
+      const match = existingTopics[best.index];
+      console.log(`[resolve] Merged "${label}" → "${match.label}"`);
+      resolved.push({ ...match, uses: match.uses + 1 });
     } else {
-      console.log(`[resolve] Created new topic: "${label}"`);
-
-      const id = crypto.randomUUID();
-      const newTopic: Topic = {
-        id,
-        label,
-        uses: 1,
-        createdAt: Date.now()
-      };
-      await db.topics.add(newTopic);
-      await storeVector(db, 'topic', id, embedding);
+      console.log(`[resolve] Created: "${label}"`);
+      const newTopic: Topic = { id: crypto.randomUUID(), label, uses: 1, createdAt: Date.now() };
       resolved.push(newTopic);
-      newTopicIndices.set(id, i);
+      newIndices.set(newTopic.id, i);
     }
-  }
+  });
 
-  return { resolved, newTopicIndices };
+  return { resolved, newIndices };
 }
 
 async function linkItemTopics(itemId: string, topicIds: string[]) {
@@ -131,227 +122,163 @@ async function linkItemTopics(itemId: string, topicIds: string[]) {
   }
 }
 
-async function enforceRelatedCap(nodeId: string) {
-  const allRelated = await db.topic_edges
-    .where('type')
-    .equals('related_to')
-    .filter(e => e.src === nodeId || e.dst === nodeId)
-    .toArray();
 
-  if (allRelated.length > 40) {
-    allRelated.sort((a, b) => a.similarity - b.similarity);
-    for (let i = 0; i < allRelated.length - 40; i++) {
-      await db.topic_edges.delete(allRelated[i].id);
+function getNeighbors(matrixRow: number, ctx: GraphContext): Neighbor[] {
+  const neighbors: Neighbor[] = [];
+
+  ctx.createdTopics.forEach(({ topic, row }) => {
+    if (row < matrixRow) {
+      neighbors.push({ topic, similarity: ctx.matrix[matrixRow][row] });
     }
-  }
-}
-
-// Build graph edges for newly created topic (parents + related + enforce caps)
-async function buildEdges(
-  newTopicId: string,
-  newTopicMatrixRow: number,
-  existingTopics: Topic[],
-  existingIdToMatrixCol: Map<string, number>,
-  similarityMatrix: number[][]
-) {
-  if (existingTopics.length === 0) return;
-
-  const neighbors = existingTopics.map(topic => {
-    const col = existingIdToMatrixCol.get(topic.id)!;
-    return {
-      topic,
-      similarity: similarityMatrix[newTopicMatrixRow][col]
-    };
   });
 
-  neighbors.sort((a, b) => b.similarity - a.similarity);
+  ctx.existingTopics.forEach(topic => {
+    const col = ctx.colMap.get(topic.id)!;
+    neighbors.push({ topic, similarity: ctx.matrix[matrixRow][col] });
+  });
+
+  return neighbors.sort((a, b) => b.similarity - a.similarity);
+}
+
+async function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContext): Promise<EdgeData[]> {
+  const neighbors = getNeighbors(matrixRow, ctx);
   const top20 = neighbors.slice(0, 20);
-  console.log('[edges] Top 5 neighbors:', top20.slice(0, 5).map(n => `${n.topic.label}:${n.similarity.toFixed(3)}`).join(', '));
+  console.log('[edges] Top 5:', top20.slice(0, 5).map(n => `${n.topic.label}:${n.similarity.toFixed(3)}`).join(', '));
 
-  // LLM selects 0-2 parent topics from top-5 candidates (filtered by >0.75 similarity)
-  const top5 = top20.slice(0, 5);
-  const candidateLabels = top5.map(n => n.topic.label).join(', ');
+  const edges: EdgeData[] = [];
 
-  const parentSelectionPrompt = `Given a new topic "${(await db.topics.get(newTopicId))?.label}", select 0-2 parent topics that are broader concepts.
+  const top5 = top20.slice(0, 5).filter(n => n.similarity >= PARENT_MIN_SIMILARITY);
+  if (top5.length > 0) {
+    const selectedLabels = await selectParents(newTopic.label, top5.map(n => n.topic.label));
+    const selectedParents = top5.filter(n => selectedLabels.includes(n.topic.label));
+    const currentParents = ctx.allEdges.filter(e => e.dst === newTopic.id && e.type === 'broader_than');
 
-Candidates: ${candidateLabels}
+    for (const parent of selectedParents) {
+      if (currentParents.length >= 2) break;
+      if (hasPath(newTopic.id, parent.topic.id, ctx.allEdges)) continue;
 
-Return JSON array of selected labels (0-2 items):
-["label1", "label2"] or []`;
-
-  const parentJson = await generateText(parentSelectionPrompt, {
-    systemPrompt: 'You select parent topics that represent broader concepts. Return valid JSON array only.',
-    schema: {
-      type: 'array',
-      items: { type: 'string' },
-      maxItems: 2
+      const edge: EdgeData = {
+        src: parent.topic.id,
+        dst: newTopic.id,
+        type: 'broader_than',
+        similarity: parent.similarity
+      };
+      edges.push(edge);
+      currentParents.push(edge);
     }
+  }
+
+  const existingRelatedIds = new Set(
+    ctx.allEdges
+      .filter(e => e.type === 'related_to' && (e.src === newTopic.id || e.dst === newTopic.id))
+      .flatMap(e => [e.src, e.dst])
+  );
+
+  const availableRelated = top20.filter(
+    n => n.similarity >= RELATED_MIN_SIMILARITY && !existingRelatedIds.has(n.topic.id)
+  );
+
+  availableRelated.slice(0, 3).forEach(n => {
+    const [src, dst] = [newTopic.id, n.topic.id].sort();
+    edges.push({ src, dst, type: 'related_to', similarity: n.similarity });
   });
 
-  let selectedParentLabels: string[] = [];
-  try {
-    const parsed = JSON.parse(parentJson);
-    if (Array.isArray(parsed)) {
-      selectedParentLabels = parsed.slice(0, 2).map(String);
-    }
-  } catch {
-    selectedParentLabels = [];
-  }
-
-  const selectedParents = top5.filter(n =>
-    selectedParentLabels.includes(n.topic.label) &&
-    n.similarity >= PARENT_MIN_SIMILARITY
-  );
-
-  for (const parent of selectedParents) {
-    const cycleExists = await hasPath(newTopicId, parent.topic.id);
-    if (cycleExists) continue;
-
-    const edgeId = crypto.randomUUID();
-    const existing = await db.topic_edges
-      .where('[src+dst+type]')
-      .equals([parent.topic.id, newTopicId, 'broader_than'])
-      .first();
-
-    if (!existing) {
-      await db.topic_edges.add({
-        id: edgeId,
-        src: parent.topic.id,
-        dst: newTopicId,
-        type: 'broader_than',
-        similarity: parent.similarity,
-        createdAt: Date.now()
-      });
-    }
-  }
-
-  // Cap: max 2 parents per node
-  const currentParents = await db.topic_edges
-    .where('[src+dst+type]')
-    .between(['\0', newTopicId, 'broader_than'], ['\uffff', newTopicId, 'broader_than'])
-    .toArray();
-
-  if (currentParents.length > 2) {
-    currentParents.sort((a, b) => a.similarity - b.similarity);
-    for (let i = 0; i < currentParents.length - 2; i++) {
-      await db.topic_edges.delete(currentParents[i].id);
-    }
-  }
-
-  // Add up to 3 related_to edges (>0.70 similarity, undirected, canonical ordering)
-  const existingRelated = await db.topic_edges
-    .where('type')
-    .equals('related_to')
-    .filter(e => e.src === newTopicId || e.dst === newTopicId)
-    .toArray();
-
-  const existingRelatedIds = new Set(existingRelated.flatMap(e => [e.src, e.dst]));
-  const availableRelated = top20.filter(n =>
-    !existingRelatedIds.has(n.topic.id) &&
-    n.similarity >= RELATED_MIN_SIMILARITY
-  );
-
-  for (let i = 0; i < Math.min(3, availableRelated.length); i++) {
-    const neighbor = availableRelated[i];
-    const [src, dst] = [newTopicId, neighbor.topic.id].sort();
-
-    const existing = await db.topic_edges
-      .where('[src+dst+type]')
-      .equals([src, dst, 'related_to'])
-      .first();
-
-    if (!existing) {
-      await db.topic_edges.add({
-        id: crypto.randomUUID(),
-        src,
-        dst,
-        type: 'related_to',
-        similarity: neighbor.similarity,
-        createdAt: Date.now()
-      });
-      await enforceRelatedCap(newTopicId);
-      await enforceRelatedCap(neighbor.topic.id);
-    }
-  }
-
-  // Cap: max 30 children per parent
-  for (const parent of selectedParents) {
-    const children = await db.topic_edges
-      .where('[src+dst+type]')
-      .between([parent.topic.id, '', 'broader_than'], [parent.topic.id, '\uffff', 'broader_than'])
-      .toArray();
-
-    if (children.length > 30) {
-      children.sort((a, b) => a.similarity - b.similarity);
-      for (let i = 0; i < children.length - 30; i++) {
-        await db.topic_edges.delete(children[i].id);
-      }
-    }
-  }
+  return edges;
 }
 
-// Main entry: insert PageResult into database with graph construction
 export async function insertPageResult(pageResult: PageResult): Promise<Item | null> {
   try {
-    return await db.transaction('rw', [db.items, db.topics, db.item_topic, db.topic_edges, db.vectors], async () => {
-    const item = await resolveItem(pageResult.title, pageResult.summary, pageResult.link);
-    if (!item) {
-      console.log('[insert] Duplicate item, skipping');
+    if (await db.items.where('link').equals(pageResult.link).first()) {
+      console.log('[insert] Duplicate, skipping');
       return null;
     }
-    console.log('[insert] New item:', item.id);
 
-    if (pageResult.contentEmbedding) {
-      await storeVector(db, 'item', item.id, pageResult.contentEmbedding);
-    }
-
-    const newTopicEmbeddings = pageResult.topicEmbeddings || [];
-    if (newTopicEmbeddings.length === 0) return item;
-
-    // Load existing topics with their embeddings
+    const newEmbeddings = pageResult.topicEmbeddings || [];
     const existingTopics = await db.topics.toArray();
     const existingEmbeddings = (await Promise.all(
       existingTopics.map(t => loadVector(db, 'topic', t.id))
     )) as number[][];
 
-    // Compute similarity matrix: [newTopics | existingTopics]
-    const allEmbeddings = [...newTopicEmbeddings, ...existingEmbeddings];
-    const tensor = new Tensor('float32', allEmbeddings.flat(), [allEmbeddings.length, newTopicEmbeddings[0].length]);
-    const similarityMatrix = await computeSimilarity(tensor);
-    console.log('[insert] Similarity matrix:', similarityMatrix.length, 'x', similarityMatrix[0]?.length);
+    const matrix = await computeSimilarity(
+      new Tensor('float32', [...newEmbeddings, ...existingEmbeddings].flat(), [
+        newEmbeddings.length + existingEmbeddings.length,
+        newEmbeddings[0]?.length || 0
+      ])
+    );
+    console.log('[insert] Similarity matrix:', matrix.length, 'x', matrix[0]?.length);
 
-    const { resolved: resolvedTopics, newTopicIndices } = await resolveTopics(
-      pageResult.topics,
-      newTopicEmbeddings,
+    const { resolved, newIndices } = resolveTopics(pageResult.topics, existingTopics, matrix);
+    console.log('[insert] Resolved:', resolved.length, 'new:', newIndices.size);
+
+    const ctx: GraphContext = {
       existingTopics,
-      similarityMatrix
-    );
-    console.log('[insert] Resolved topics:', resolvedTopics.length, 'new:', newTopicIndices.size);
+      createdTopics: [],
+      allEdges: (await db.topic_edges.toArray()).map(e => ({
+        src: e.src,
+        dst: e.dst,
+        type: e.type,
+        similarity: e.similarity
+      })),
+      matrix,
+      colMap: new Map(existingTopics.map((t, i) => [t.id, newEmbeddings.length + i]))
+    };
 
-    await linkItemTopics(
-      item.id,
-      resolvedTopics.map(t => t.id)
-    );
-
-    const newTopics = resolvedTopics.filter(t => t.uses === 1);
-    const existingIdToMatrixCol = new Map<string, number>();
-    existingTopics.forEach((topic, idx) => {
-      existingIdToMatrixCol.set(topic.id, newTopicEmbeddings.length + idx);
-    });
+    const newTopics = resolved.filter(t => t.uses === 1);
 
     for (const topic of newTopics) {
-      const matrixRow = newTopicIndices.get(topic.id);
-      if (matrixRow !== undefined) {
-        console.log('[insert] Building edges for:', topic.label);
-        await buildEdges(topic.id, matrixRow, existingTopics, existingIdToMatrixCol, similarityMatrix);
+      const row = newIndices.get(topic.id);
+      if (row !== undefined) {
+        console.log('[insert] Building edges:', topic.label);
+        const edges = await computeEdges(topic, row, ctx);
+        ctx.allEdges.push(...edges);
+        ctx.createdTopics.push({ topic, row });
       }
     }
-    console.log('[insert] Complete');
 
+    const newEdges = ctx.allEdges.slice((await db.topic_edges.count()));
+
+    return await db.transaction('rw', [db.items, db.topics, db.item_topic, db.topic_edges, db.vectors], async () => {
+      const item: Item = {
+        id: crypto.randomUUID(),
+        title: pageResult.title,
+        summary: pageResult.summary,
+        link: pageResult.link,
+        createdAt: Date.now()
+      };
+      await db.items.add(item);
+      console.log('[insert] Item:', item.id);
+
+      if (pageResult.contentEmbedding) {
+        await storeVector(db, 'item', item.id, pageResult.contentEmbedding);
+      }
+
+      for (const topic of resolved) {
+        const existing = await db.topics.get(topic.id);
+        if (existing) {
+          await db.topics.update(topic.id, { uses: existing.uses + 1 });
+        } else {
+          await db.topics.add(topic);
+          const row = newIndices.get(topic.id);
+          if (row !== undefined) {
+            await storeVector(db, 'topic', topic.id, newEmbeddings[row]);
+          }
+        }
+      }
+
+      await linkItemTopics(item.id, resolved.map(t => t.id));
+
+      for (const edge of newEdges) {
+        const exists = await db.topic_edges.where('[src+dst+type]').equals([edge.src, edge.dst, edge.type]).first();
+        if (!exists) {
+          await db.topic_edges.add({ ...edge, id: crypto.randomUUID(), createdAt: Date.now() });
+        }
+      }
+
+      console.log('[insert] Complete');
       return item;
     });
   } catch (error) {
-    console.error('[insert] Transaction error:', error);
+    console.error('[insert] Error:', error);
     throw error;
   }
 }
