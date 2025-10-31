@@ -43,33 +43,46 @@ const METADATA_SCHEMA = {
 export async function extractPageResult(): Promise<PageResult> {
   // 1. Extract page content
   const extracted = await extractPageContent();
-  const truncatedText = extracted.text.slice(0, 20000);
+
+  const summarizerText = extracted.text.slice(0, 20000);
+  const llmText = extracted.text.slice(0, 20000);
+
+  const userPrompt = `Original title: ${extracted.title}
+
+Content:
+${llmText}`;
+
+  console.log('[extract] Total user prompt length:', userPrompt.length);
 
   // 2. Generate topics and summary
   const [summary, metadataJson] = await Promise.all([
-    summarize(truncatedText),
+    summarize(summarizerText),
     generateText(
-      `Original title: ${extracted.title}
-
-Content:
-${truncatedText}`,
+      userPrompt,
       {
-        systemPrompt: `You extract clean metadata from web text.
+        systemPrompt: `You extract concise, high-quality metadata from technical or academic web text.
+Return JSON ONLY with this schema:
+{"title": "...", "topics": ["...", "...", "..."]}
 
+Rules:
 TITLE
-- short and descriptive
+- Keep short, clear, and descriptive (≤12 words).
+- Remove source/site names, dates, and extra punctuation.
 
 TOPICS (1–3)
-- extract 1–3 core topics only
-- each topic: short noun phrase (1–4 words), lowercase, singular
-- choose the most specific technical terms
-- no broad or generic words
-- expand abbreviations (e.g. "llm" → "large language model")
-- always use singular form even if plural in text
-- no duplicates
+- Extract 1–3 *core technical concepts* that the text is primarily about.
+- Each topic: short noun phrase (1–4 words), lowercase, singular form.
+- Choose the most *specific and technical* terms, not general fields.
+  Wrong: too broad: "artificial intelligence", "computer science"
+  Correct: specific: "text embedding", "contrastive learning", "vector quantization"
+- Expand abbreviations and acronyms (e.g., "LLM" → "large language model").
+- Merge synonyms or duplicates.
+- If multiple levels exist, choose the *most specific meaningful one* (e.g., "sentence embedding" instead of "embedding").
+- Prefer method or object-level topics (models, algorithms, data types) over general domains.
+- Avoid adjectives like "novel", "improved", "efficient".
 
-Return JSON only:
-{"title": "...", "topics": ["...", "..."]}
+Return clean, valid JSON only.
+
 `,
         schema: METADATA_SCHEMA
       }

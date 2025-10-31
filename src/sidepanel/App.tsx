@@ -1,15 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { runPipeline } from '../services/pipeline';
 import { getEmbedding } from '../llm/embeddings';
 import { clearDatabase } from '../db/database';
+import { getGraphData, calculateHierarchicalLayout, type GraphData } from '../services/graph';
 import { Button } from '@/components/ui/button';
-import type { PageResult } from '../types/schema';
+import GraphView from '../components/GraphView';
 
 export default function App() {
   const [modelLoading, setModelLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState<PageResult | null>(null);
+  const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [error, setError] = useState<string>('');
+
+  const layout = useMemo(() => {
+    if (!graphData) return null;
+    return calculateHierarchicalLayout(graphData);
+  }, [graphData]);
+
+  const loadGraph = async () => {
+    try {
+      const data = await getGraphData();
+      console.log(data);
+      setGraphData(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load graph');
+    }
+  };
 
   useEffect(() => {
     getEmbedding('warmup')
@@ -18,16 +34,17 @@ export default function App() {
         setError(err.message);
         setModelLoading(false);
       });
+
+    loadGraph();
   }, []);
 
   const handleProcess = async () => {
     setProcessing(true);
     setError('');
-    setResult(null);
 
     try {
-      const pageResult = await runPipeline();
-      setResult(pageResult);
+      await runPipeline();
+      await loadGraph();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Processing failed');
     } finally {
@@ -40,7 +57,7 @@ export default function App() {
 
     try {
       await clearDatabase();
-      setResult(null);
+      setGraphData(null);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to clear database');
@@ -48,75 +65,40 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="space-y-4">
+    <div className="flex flex-col h-screen bg-background">
+      <div className="p-4 border-b space-y-2">
         {modelLoading && (
           <p className="text-xs text-muted-foreground">Loading model...</p>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <Button onClick={handleProcess} disabled={modelLoading || processing} variant="outline">
             {processing ? 'Processing...' : 'Process'}
           </Button>
           <Button onClick={handleClearDB} disabled={processing} variant="outline">
             Clear DB
           </Button>
+
+          {graphData && graphData.topics.length > 0 && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              {graphData.topics.length} topics, {graphData.items.length} items
+            </span>
+          )}
         </div>
 
         {error && (
           <p className="text-sm text-destructive">{error}</p>
         )}
+      </div>
 
-        {result && (
-          <div className="space-y-3">
-            <div>
-              <h3 className="font-semibold text-foreground">{result.title}</h3>
-              <a href={result.link} className="text-xs text-muted-foreground hover:underline" target="_blank" rel="noopener noreferrer">
-                {result.link}
-              </a>
-            </div>
-
-            <div className="p-4 border rounded-md bg-muted/20">
-              <p className="text-sm text-foreground whitespace-pre-wrap">{result.summary}</p>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">Topics:</p>
-              <div className="flex flex-wrap gap-2">
-                {result.topics.map((topic, i) => (
-                  <span key={i} className="px-2 py-1 text-xs bg-secondary text-secondary-foreground rounded">
-                    {topic}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {result.topicEmbeddings && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2">Topic Embeddings:</p>
-                <div className="space-y-2">
-                  {result.topics.map((topic, i) => (
-                    <div key={i} className="p-3 border rounded-md bg-muted/20">
-                      <p className="text-xs font-medium mb-1">{topic}</p>
-                      <p className="text-xs text-muted-foreground font-mono">
-                        [{result.topicEmbeddings![i].slice(0, 5).map(v => v.toFixed(3)).join(', ')}, ...] ({result.topicEmbeddings![i].length}d)
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {result.contentEmbedding && (
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2">Content Embedding:</p>
-                <div className="p-3 border rounded-md bg-muted/20">
-                  <p className="text-xs text-muted-foreground font-mono">
-                    [{result.contentEmbedding.slice(0, 5).map(v => v.toFixed(3)).join(', ')}, ...] ({result.contentEmbedding.length}d)
-                  </p>
-                </div>
-              </div>
-            )}
+      <div className="flex-1 p-4 overflow-hidden">
+        {layout && graphData ? (
+          <GraphView layout={layout} graphData={graphData} />
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <p className="text-sm text-muted-foreground">
+              {graphData ? 'No topics yet. Process a page to start.' : 'Loading...'}
+            </p>
           </div>
         )}
       </div>

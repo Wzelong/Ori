@@ -5,8 +5,8 @@ import type { PageResult, Topic, Item, TopicEdge } from '../types/schema';
 import { Tensor } from '@huggingface/transformers';
 
 const TOPIC_MERGE_THRESHOLD = 0.92;
-const PARENT_MIN_SIMILARITY = 0.75;
-const RELATED_MIN_SIMILARITY = 0.70;
+const PARENT_MIN_SIMILARITY = 0.86;
+const RELATED_MIN_SIMILARITY = 0.86;
 
 type EdgeData = Omit<TopicEdge, 'id' | 'createdAt'>;
 type Neighbor = { topic: Topic; similarity: number };
@@ -50,22 +50,39 @@ function findBestMatch(similarities: number[]): { index: number; similarity: num
 async function selectParents(topicLabel: string, candidates: string[]): Promise<string[]> {
   if (candidates.length === 0) return [];
 
-  const prompt = `Given a new topic "${topicLabel}", select 0-2 parent topics that are broader concepts.
+  const prompt = `Child: "${topicLabel}"
 
-Candidates: ${candidates.join(', ')}
+Candidates (labels only):
+${candidates.join(', ')}
 
-Return JSON array of selected labels (0-2 items):
-["label1", "label2"] or []`;
+Return:
+["Parent Label 1", "Parent Label 2"]
+or:
+[]`;
 
   const json = await generateText(prompt, {
-    systemPrompt: 'You select parent topics that represent broader concepts. Return valid JSON array only.',
+    systemPrompt: `You decide hypernym (broader-than) relations in a concept graph.
+Return ONLY a JSON array of 0–2 strings, each exactly matching one candidate label.
+Do not include any text before or after the JSON.
+Rules:
+- A parent is a STRICTLY BROADER category of the child (X is a TYPE OF Y).
+- Do NOT pick siblings, instances/examples, tasks, or topics that are narrower.
+- It is OK to return an empty array if none are correct.
+`,
     schema: { type: 'array', items: { type: 'string' }, maxItems: 2 }
   });
 
+  console.log(`[selectParents] Topic: "${topicLabel}"`);
+  console.log(`[selectParents] Candidates: [${candidates.join(', ')}]`);
+  console.log(`[selectParents] LLM Response: ${json}`);
+
   try {
     const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed.slice(0, 2).map(String) : [];
-  } catch {
+    const result = Array.isArray(parsed) ? parsed.slice(0, 2).map(String) : [];
+    console.log(`[selectParents] Selected: [${result.join(', ')}]`);
+    return result;
+  } catch (err) {
+    console.log(`[selectParents] Parse error:`, err);
     return [];
   }
 }
@@ -83,6 +100,16 @@ function resolveTopics(
     const exactMatch = existingTopics.find(t => t.label === label);
     if (exactMatch) {
       resolved.push({ ...exactMatch, uses: exactMatch.uses + 1 });
+      return;
+    }
+
+    const newTopicSimilarities = similarityMatrix[i].slice(0, i);
+    const bestNewMatch = findBestMatch(newTopicSimilarities);
+
+    if (bestNewMatch.index >= 0 && bestNewMatch.similarity > TOPIC_MERGE_THRESHOLD) {
+      const existingResolved = resolved[bestNewMatch.index];
+      console.log(`[resolve] Merged new topics: "${label}" → "${existingResolved.label}" (${bestNewMatch.similarity.toFixed(3)})`);
+      resolved.push({ ...existingResolved, uses: existingResolved.uses + 1 });
       return;
     }
 
@@ -168,14 +195,20 @@ async function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContex
     }
   }
 
-  const existingRelatedIds = new Set(
-    ctx.allEdges
-      .filter(e => e.type === 'related_to' && (e.src === newTopic.id || e.dst === newTopic.id))
-      .flatMap(e => [e.src, e.dst])
-  );
+  const connectedNodes = new Set<string>();
+
+  ctx.allEdges.forEach(edge => {
+    if (edge.src === newTopic.id) connectedNodes.add(edge.dst);
+    if (edge.dst === newTopic.id) connectedNodes.add(edge.src);
+  });
+
+  edges.forEach(edge => {
+    if (edge.src === newTopic.id) connectedNodes.add(edge.dst);
+    if (edge.dst === newTopic.id) connectedNodes.add(edge.src);
+  });
 
   const availableRelated = top20.filter(
-    n => n.similarity >= RELATED_MIN_SIMILARITY && !existingRelatedIds.has(n.topic.id)
+    n => n.similarity >= RELATED_MIN_SIMILARITY && !connectedNodes.has(n.topic.id)
   );
 
   availableRelated.slice(0, 3).forEach(n => {
