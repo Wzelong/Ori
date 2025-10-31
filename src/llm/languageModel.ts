@@ -16,7 +16,9 @@ export async function generateText(
     : [];
 
   const session = await (self as any).LanguageModel.create({
-    initialPrompts
+    initialPrompts,
+    temperature: 0.1,
+    topK: 1,
   });
 
   const promptOptions = options?.schema

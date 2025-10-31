@@ -5,11 +5,14 @@ import type { PageResult, Topic, Item, TopicEdge } from '../types/schema';
 import { Tensor } from '@huggingface/transformers';
 
 const TOPIC_MERGE_THRESHOLD = 0.92;
-const PARENT_MIN_SIMILARITY = 0.86;
-const RELATED_MIN_SIMILARITY = 0.86;
+const CLASSIFICATION_MIN_SIMILARITY = 0.86;
+const MAX_CLASSIFICATION_CANDIDATES = 8;
+const MAX_SIBLING_EDGES = 3;
 
 type EdgeData = Omit<TopicEdge, 'id' | 'createdAt'>;
 type Neighbor = { topic: Topic; similarity: number };
+type RelationshipType = 'PARENT' | 'CHILD' | 'SIBLING' | 'UNRELATED';
+type Classification = { label: string; type: RelationshipType };
 
 type GraphContext = {
   existingTopics: Topic[];
@@ -47,42 +50,63 @@ function findBestMatch(similarities: number[]): { index: number; similarity: num
   return { index: bestIdx, similarity: bestSim };
 }
 
-async function selectParents(topicLabel: string, candidates: string[]): Promise<string[]> {
+async function classifyRelationships(
+  topicLabel: string,
+  candidates: Array<{ label: string; similarity: number }>
+): Promise<Classification[]> {
   if (candidates.length === 0) return [];
 
-  const prompt = `Child: "${topicLabel}"
+  const prompt = `Topic: "${topicLabel}"
 
-Candidates (labels only):
-${candidates.join(', ')}
+Candidates:
+${JSON.stringify(candidates, null, 2)}
 
-Return:
-["Parent Label 1", "Parent Label 2"]
-or:
-[]`;
+Decision guide (apply in order):
+1) Type-of test: does "Topic is a type of Candidate" read naturally?
+   - If yes → PARENT (unless Candidate is a tool/dataset/property/metric/task).
+2) Reverse type-of: does "Candidate is a type of Topic" read naturally?
+   - If yes → CHILD (unless Candidate is a tool/dataset/property/metric/task).
+3) Same specificity (close variants under a common supercategory) → SIBLING.
+4) Else → UNRELATED.
+
+Return JSON ONLY with one object per candidate, same order, using their ids.
+`;
 
   const json = await generateText(prompt, {
-    systemPrompt: `You decide hypernym (broader-than) relations in a concept graph.
-Return ONLY a JSON array of 0–2 strings, each exactly matching one candidate label.
-Do not include any text before or after the JSON.
-Rules:
-- A parent is a STRICTLY BROADER category of the child (X is a TYPE OF Y).
-- Do NOT pick siblings, instances/examples, tasks, or topics that are narrower.
-- It is OK to return an empty array if none are correct.
-`,
-    schema: { type: 'array', items: { type: 'string' }, maxItems: 2 }
+    systemPrompt: `You classify relationships in a concept graph. For each candidate, return one of:
+- PARENT  = candidate is STRICTLY BROADER than Topic (type-of):  "Topic is a type of Candidate" reads naturally; Topic's scope ⊂ Candidate's scope.
+- CHILD   = candidate is STRICTLY NARROWER than Topic (type-of): "Candidate is a type of Topic".
+- SIBLING = same specificity (share a broader parent) but neither is type-of the other.
+- UNRELATED = different domain or only part/usage/tool/dataset/property/metric relation.
+
+Never use part-of, made-of, used-by, dataset-of, metric-of, tool-of as PARENT/CHILD.
+If the type-of test is not clearly true, prefer SIBLING or UNRELATED.
+Return JSON ONLY matching the schema: [{"id":"...", "type":"PARENT|CHILD|SIBLING|UNRELATED"}] with EXACTLY one entry per candidate in the SAME ORDER.
+No extra text.`,
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          type: { type: 'string', enum: ['PARENT', 'CHILD', 'SIBLING', 'UNRELATED'] }
+        },
+        required: ['label', 'type']
+      }
+    }
   });
 
-  console.log(`[selectParents] Topic: "${topicLabel}"`);
-  console.log(`[selectParents] Candidates: [${candidates.join(', ')}]`);
-  console.log(`[selectParents] LLM Response: ${json}`);
+  console.log(`[classifyRelationships] Topic: "${topicLabel}"`);
+  console.log(`[classifyRelationships] Candidates: [${candidates.map(c => c.label).join(', ')}]`);
+  console.log(`[classifyRelationships] LLM Response: ${json}`);
 
   try {
     const parsed = JSON.parse(json);
-    const result = Array.isArray(parsed) ? parsed.slice(0, 2).map(String) : [];
-    console.log(`[selectParents] Selected: [${result.join(', ')}]`);
+    const result: Classification[] = Array.isArray(parsed) ? parsed : [];
+    console.log(`[classifyRelationships] Classifications:`, result);
     return result;
   } catch (err) {
-    console.log(`[selectParents] Parse error:`, err);
+    console.log(`[classifyRelationships] Parse error:`, err);
     return [];
   }
 }
@@ -170,33 +194,23 @@ function getNeighbors(matrixRow: number, ctx: GraphContext): Neighbor[] {
 async function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContext): Promise<EdgeData[]> {
   const neighbors = getNeighbors(matrixRow, ctx);
   const top20 = neighbors.slice(0, 20);
-  console.log('[edges] Top 5:', top20.slice(0, 5).map(n => `${n.topic.label}:${n.similarity.toFixed(3)}`).join(', '));
+  console.log('[edges] Top 20:', top20.slice(0, 5).map(n => `${n.topic.label}:${n.similarity.toFixed(3)}`).join(', '));
 
   const edges: EdgeData[] = [];
 
-  const top5 = top20.slice(0, 5).filter(n => n.similarity >= PARENT_MIN_SIMILARITY);
-  if (top5.length > 0) {
-    const selectedLabels = await selectParents(newTopic.label, top5.map(n => n.topic.label));
-    const selectedParents = top5.filter(n => selectedLabels.includes(n.topic.label));
-    const currentParents = ctx.allEdges.filter(e => e.dst === newTopic.id && e.type === 'broader_than');
+  const topCandidates = top20.filter(n => n.similarity >= CLASSIFICATION_MIN_SIMILARITY);
 
-    for (const parent of selectedParents) {
-      if (currentParents.length >= 2) break;
-      if (hasPath(newTopic.id, parent.topic.id, ctx.allEdges)) continue;
+  const candidates = topCandidates
+    .slice(0, MAX_CLASSIFICATION_CANDIDATES)
+    .map(n => ({ label: n.topic.label, similarity: n.similarity }));
 
-      const edge: EdgeData = {
-        src: parent.topic.id,
-        dst: newTopic.id,
-        type: 'broader_than',
-        similarity: parent.similarity
-      };
-      edges.push(edge);
-      currentParents.push(edge);
-    }
+  if (candidates.length === 0) {
+    return edges;
   }
 
-  const connectedNodes = new Set<string>();
+  const classifications = await classifyRelationships(newTopic.label, candidates);
 
+  const connectedNodes = new Set<string>();
   ctx.allEdges.forEach(edge => {
     if (edge.src === newTopic.id) connectedNodes.add(edge.dst);
     if (edge.dst === newTopic.id) connectedNodes.add(edge.src);
@@ -207,14 +221,53 @@ async function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContex
     if (edge.dst === newTopic.id) connectedNodes.add(edge.src);
   });
 
-  const availableRelated = top20.filter(
-    n => n.similarity >= RELATED_MIN_SIMILARITY && !connectedNodes.has(n.topic.id)
-  );
+  let parentCount = 0;
+  let childCount = 0;
+  let siblingCount = 0;
 
-  availableRelated.slice(0, 3).forEach(n => {
-    const [src, dst] = [newTopic.id, n.topic.id].sort();
-    edges.push({ src, dst, type: 'related_to', similarity: n.similarity });
-  });
+  for (const classification of classifications) {
+    const neighbor = top20.find(n => n.topic.label === classification.label);
+    if (!neighbor) continue;
+
+    if (classification.type === 'PARENT') {
+      if (parentCount >= 2) continue;
+      if (hasPath(newTopic.id, neighbor.topic.id, ctx.allEdges)) continue;
+
+      edges.push({
+        src: neighbor.topic.id,
+        dst: newTopic.id,
+        type: 'broader_than',
+        similarity: neighbor.similarity
+      });
+      connectedNodes.add(neighbor.topic.id);
+      parentCount++;
+    } else if (classification.type === 'CHILD') {
+      if (childCount >= 2) continue;
+      if (hasPath(neighbor.topic.id, newTopic.id, ctx.allEdges)) continue;
+
+      edges.push({
+        src: newTopic.id,
+        dst: neighbor.topic.id,
+        type: 'broader_than',
+        similarity: neighbor.similarity
+      });
+      connectedNodes.add(neighbor.topic.id);
+      childCount++;
+    } else if (classification.type === 'SIBLING') {
+      if (siblingCount >= MAX_SIBLING_EDGES) continue;
+      if (connectedNodes.has(neighbor.topic.id)) continue;
+
+      const [src, dst] = [newTopic.id, neighbor.topic.id].sort();
+      edges.push({
+        src,
+        dst,
+        type: 'related_to',
+        similarity: neighbor.similarity
+      });
+      connectedNodes.add(neighbor.topic.id);
+      siblingCount++;
+    }
+  }
 
   return edges;
 }

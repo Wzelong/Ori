@@ -11,7 +11,8 @@ export async function summarize(text: string): Promise<string> {
     type: 'key-points',
     length: 'short',
     format: 'markdown',
-    sharedContext: 'Output language: en'
+    expectedInputLanguages: ["en"],
+    outputLanguage: "en",
   });
 
   try {

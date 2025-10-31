@@ -33,8 +33,8 @@ const METADATA_SCHEMA = {
     topics: {
       type: 'array',
       items: { type: 'string' },
-      minItems: 1,
-      maxItems: 3
+      minItems: 2,
+      maxItems: 4
     }
   },
   required: ['title', 'topics']
@@ -45,53 +45,50 @@ export async function extractPageResult(): Promise<PageResult> {
   const extracted = await extractPageContent();
 
   const summarizerText = extracted.text.slice(0, 20000);
-  const llmText = extracted.text.slice(0, 20000);
 
+  // 2. Generate summary first
+  const summary = await summarize(summarizerText);
+
+  // 3. Extract topics from summary
   const userPrompt = `Original title: ${extracted.title}
 
-Content:
-${llmText}`;
+Summary:
+${summary}`;
 
-  console.log('[extract] Total user prompt length:', userPrompt.length);
-
-  // 2. Generate topics and summary
-  const [summary, metadataJson] = await Promise.all([
-    summarize(summarizerText),
-    generateText(
-      userPrompt,
-      {
-        systemPrompt: `You extract concise, high-quality metadata from technical or academic web text.
+  const metadataJson = await generateText(
+    userPrompt,
+    {
+      systemPrompt: `You extract concise, high-quality metadata from summarized web text.
 Return JSON ONLY with this schema:
-{"title": "...", "topics": ["...", "...", "..."]}
+{"title": "...", "topics": ["core-concept", "related-1", "related-2", "related-3"]}
 
 Rules:
 TITLE
 - Keep short, clear, and descriptive (≤12 words).
 - Remove source/site names, dates, and extra punctuation.
 
-TOPICS (1–3)
-- Extract 1–3 *core technical concepts* that the text is primarily about.
-- Each topic: short noun phrase (1–4 words), lowercase, singular form.
-- Choose the most *specific and technical* terms, not general fields.
-  Wrong: too broad: "artificial intelligence", "computer science"
-  Correct: specific: "text embedding", "contrastive learning", "vector quantization"
-- Expand abbreviations and acronyms (e.g., "LLM" → "large language model").
-- Merge synonyms or duplicates.
-- If multiple levels exist, choose the *most specific meaningful one* (e.g., "sentence embedding" instead of "embedding").
-- Prefer method or object-level topics (models, algorithms, data types) over general domains.
-- Avoid adjectives like "novel", "improved", "efficient".
+TOPICS (2–4 total)
+Extract topics in this order:
+1. FIRST topic: The single most important SPECIFIC concept this page is fundamentally about
+   - NOT a broad field like "Artificial Intelligence" or "Quantum Mechanics"
+   - The CORE subject the page focuses on
+2. REMAINING topics (2–3): Related concepts that explore depth and breadth from the given summary
+   - Context, applications, related techniques, or closely connected concepts
+
+For each topic:
+- Short noun phrase (1–4 words), lowercase, singular form
+- Expand abbreviations and acronyms (e.g., "LLM" → "large language model")
+- Avoid adjectives like "novel", "improved", "efficient"
 
 Return clean, valid JSON only.
-
 `,
-        schema: METADATA_SCHEMA
-      }
-    )
-  ]);
+      schema: METADATA_SCHEMA
+    }
+  );
 
   const metadata = JSON.parse(metadataJson);
 
-  // 3. Create embeddings
+  // 4. Create embeddings
   const topicEmbeddingsTensor = await getEmbeddings(metadata.topics);
   const topicEmbeddings = topicEmbeddingsTensor.tolist() as number[][];
   const contentEmbedding = await getEmbedding(`Title: ${metadata.title}\n\n${summary}`);
