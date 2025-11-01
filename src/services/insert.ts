@@ -1,5 +1,6 @@
 import { db } from '../db/database';
-import { computeSimilarity, storeVector, loadVector } from '../llm/embeddings';
+import { storeVector, loadVector } from '../llm/embeddings';
+import { computeSimilarityFromOffscreen } from '../llm/offscreenClient';
 import type { PageResult, Topic, Item, TopicEdge } from '../types/schema';
 import { Tensor } from '@huggingface/transformers';
 import { recomputeAllTopicPositions } from './positions';
@@ -52,7 +53,6 @@ function resolveTopics(
 
     if (bestNewMatch.index >= 0 && bestNewMatch.similarity > TOPIC_MERGE_THRESHOLD) {
       const existingResolved = resolved[bestNewMatch.index];
-      console.log(`[resolve] Merged new topics: "${label}" → "${existingResolved.label}" (${bestNewMatch.similarity.toFixed(3)})`);
       resolved.push({ ...existingResolved, uses: existingResolved.uses + 1 });
       return;
     }
@@ -67,14 +67,11 @@ function resolveTopics(
     const similarities = similarityMatrix[i].slice(topics.length);
     const best = findBestMatch(similarities);
 
-    console.log(`[resolve] "${label}" best: ${best.similarity.toFixed(3)} (threshold: ${TOPIC_MERGE_THRESHOLD})`);
 
     if (best.index >= 0 && best.similarity > TOPIC_MERGE_THRESHOLD) {
       const match = existingTopics[best.index];
-      console.log(`[resolve] Merged "${label}" → "${match.label}"`);
       resolved.push({ ...match, uses: match.uses + 1 });
     } else {
-      console.log(`[resolve] Created: "${label}"`);
       const newTopic: Topic = { id: crypto.randomUUID(), label, uses: 1, createdAt: Date.now() };
       resolved.push(newTopic);
       newIndices.set(newTopic.id, i);
@@ -115,9 +112,6 @@ function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContext): Ed
   const neighbors = getNeighbors(matrixRow, ctx);
   const candidates = neighbors.filter(n => n.similarity >= EDGE_MIN_SIMILARITY);
 
-  console.log('[edges]', newTopic.label, '- top neighbors:',
-    candidates.slice(0, 5).map(n => `${n.topic.label}:${n.similarity.toFixed(3)}`).join(', '));
-
   const connectedNodes = new Set<string>();
   ctx.allEdges.forEach(edge => {
     if (edge.src === newTopic.id) connectedNodes.add(edge.dst);
@@ -143,7 +137,6 @@ function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContext): Ed
 export async function insertPageResult(pageResult: PageResult): Promise<Item | null> {
   try {
     if (await db.items.where('link').equals(pageResult.link).first()) {
-      console.log('[insert] Duplicate, skipping');
       return null;
     }
 
@@ -153,16 +146,14 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
       existingTopics.map(t => loadVector(db, 'topic', t.id))
     )) as number[][];
 
-    const matrix = await computeSimilarity(
+    const matrix = await computeSimilarityFromOffscreen(
       new Tensor('float32', [...newEmbeddings, ...existingEmbeddings].flat(), [
         newEmbeddings.length + existingEmbeddings.length,
         newEmbeddings[0]?.length || 0
       ])
     );
-    console.log('[insert] Similarity matrix:', matrix.length, 'x', matrix[0]?.length);
 
     const { resolved, newIndices } = resolveTopics(pageResult.topics, existingTopics, matrix);
-    console.log('[insert] Resolved:', resolved.length, 'new:', newIndices.size);
 
     const ctx: GraphContext = {
       existingTopics,
@@ -181,7 +172,6 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
     for (const topic of newTopics) {
       const row = newIndices.get(topic.id);
       if (row !== undefined) {
-        console.log('[insert] Building edges:', topic.label);
         const edges = computeEdges(topic, row, ctx);
         ctx.allEdges.push(...edges);
         ctx.createdTopics.push({ topic, row });
@@ -199,7 +189,6 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
         createdAt: Date.now()
       };
       await db.items.add(item);
-      console.log('[insert] Item:', item.id);
 
       if (pageResult.contentEmbedding) {
         await storeVector(db, 'item', item.id, pageResult.contentEmbedding);
@@ -227,12 +216,17 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
         }
       }
 
-      console.log('[insert] Complete');
 
       if (newTopics.length > 0) {
-        console.log('[insert] Recomputing topic positions...');
-        await recomputeAllTopicPositions();
+        setTimeout(() => {
+          recomputeAllTopicPositions().catch(err =>
+            console.error('[insert] Position recomputation failed:', err)
+          );
+        }, 0);
       }
+
+      const timestamp = Date.now();
+      chrome.storage.local.set({ lastInsertionTime: timestamp });
 
       return item;
     });

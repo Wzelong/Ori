@@ -1,104 +1,130 @@
-# Ori — Chrome Built-in AI Challenge 2025
+# Ori
 
-Your personal knowledge graph powered by Chrome built-in AI. Automatically capture, summarize, and structure knowledge from web pages and YouTube videos into a private local knowledge graph.
+An intelligent Chrome extension that transforms your browsing history into an interactive 3D knowledge graph using on-device AI.
 
-## Overview
+## Problem Statement
 
-Ori is a Chrome extension that leverages Gemini Nano's built-in AI APIs (Prompt API, Summarizer API, Translator API) to transform your browsing history into an intelligent, searchable knowledge base. All processing happens on-device for privacy and offline use.
+Traditional browser bookmarks and history are flat, disconnected lists that fail to capture the semantic relationships between the content you consume. Users cannot discover connections between topics, search by meaning rather than keywords, or gain insights about their learning patterns over time.
 
-## Features
+## Solution
 
-- **Automatic Capture**: Extract content from web pages and YouTube videos
-- **AI Summarization**: Generate summaries using Chrome's built-in Summarizer API
-- **Knowledge Graph**: Build connections between related content
-- **Semantic Search**: Query your knowledge base with natural language
-- **Privacy First**: All data stored locally using IndexedDB (Dexie)
-- **Offline Ready**: No external API calls, works completely offline
+Ori automatically builds a living semantic knowledge graph from your browsing activity. It captures valuable content as you browse, understands context through AI summarization and topic extraction, discovers relationships between concepts via vector similarity, and visualizes connections in an interactive 3D star map. The system generates contextual insights using retrieval-augmented generation over your browsing history while operating entirely offline with on-device AI for privacy.
 
-## Tech Stack
+Key advantages:
+- **On-device processing**: All AI operations run locally using Chrome's built-in Gemini Nano. No cloud API calls.
+- **Semantic organization**: Content grouped by meaning, not manual folders.
+- **Automatic graph construction**: Zero manual tagging required.
+- **3D spatial visualization**: Intuitive metaphor for knowledge exploration.
+- **Conversational insights**: RAG-powered interface over your history.
 
-- **Framework**: React + TypeScript
-- **Build Tool**: Vite + CRXJS
-- **Styling**: TailwindCSS + shadcn/ui (Slate theme)
-- **Database**: Dexie (IndexedDB wrapper)
-- **AI**: Chrome Built-in APIs (Gemini Nano)
-  - Prompt API
-  - Summarizer API
-  - Translator API
-
-## Project Structure
-
-```
-ori/
-├─ src/
-│  ├─ background/       # Service worker
-│  ├─ popup/            # Popup UI
-│  ├─ sidepanel/        # Side panel UI
-│  ├─ options/          # Options page
-│  ├─ components/ui/    # shadcn/ui components (as needed)
-│  └─ styles/           # Tailwind CSS
-├─ public/icons/        # Extension icons
-└─ manifest.config.ts   # Chrome extension manifest
-```
-
-## Getting Started
+## Installation
 
 ### Prerequisites
 
-- Node.js 18+
-- Chrome Browser (with AI features enabled)
+Chrome Canary with the following experimental features enabled:
 
-### Installation
+```
+chrome://flags/#prompt-api-for-gemini-nano
+chrome://flags/#summarization-api-for-gemini-nano
+chrome://flags/#optimization-guide-on-device-model
+```
 
-1. Install dependencies:
+Set all three to "Enabled" and restart Chrome.
+
+### Build and Load
 
 ```bash
+git clone https://github.com/yourusername/ori.git
+cd ori
 npm install
-```
-
-2. Start development server:
-
-```bash
-npm run dev
-```
-
-3. Load extension in Chrome:
-   - Open `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked"
-   - Select the `dist` directory
-
-### Build for Production
-
-```bash
 npm run build
 ```
 
-The packaged extension will be in the `release` directory.
+1. Navigate to `chrome://extensions`
+2. Enable "Developer mode"
+3. Click "Load unpacked"
+4. Select the `dist` directory
 
-## Chrome AI APIs Setup
+## Tech Stack
 
-To use Chrome's built-in AI features:
+### Frontend
+- React 19.1.0 + TypeScript
+- Vite 7.0.5 build system
+- Tailwind CSS 4.1.14 for styling
+- shadcn/ui components (Radix UI primitives)
 
-1. Use Chrome Canary or Dev channel
-2. Enable flags at `chrome://flags`:
-   - `#optimization-guide-on-device-model`
-   - `#prompt-api-for-gemini-nano`
-   - `#summarization-api-for-gemini-nano`
+### 3D Visualization
+- three.js 0.180.0
+- @react-three/fiber 9.4.0
+- @react-three/drei 10.7.6
+- @react-three/postprocessing 3.0.4 (Bloom effects)
 
-## Development
+### Database
+- Dexie 4.2.1 (IndexedDB wrapper)
+- Schema: topics, items, item_topic, topic_edges, vectors
 
-### Key Files
+### AI/ML
+- **Embeddings**: Hugging Face Transformers.js with onnx-community/embeddinggemma-300m-ONNX (768-dimensional vectors)
+- **LLM**: Chrome Prompt API (Gemini Nano)
+- **Summarization**: Chrome Summarizer API
+- **Dimensionality Reduction**: umap-js 1.4.0 with custom PCA implementation
 
-- `src/background/background.ts` - Service worker entry point
-- `src/popup/App.tsx` - Popup UI
-- `src/sidepanel/App.tsx` - Side panel UI
-- `src/options/App.tsx` - Options page
+### Chrome APIs
+- `chrome.runtime`: Message passing between components
+- `chrome.tabs`: Content extraction from active tabs
+- `chrome.scripting`: Script injection for content access
+- `chrome.storage`: Settings synchronization
+- `chrome.sidePanel`: Side panel UI hosting
+- `chrome.offscreen`: WASM embedding model hosting (bypasses service worker limitations)
+- `chrome.webNavigation`: SPA navigation tracking
 
-## License
+## Functionality
 
-MIT
+### Content Extraction
+Automatically extracts page title, URL, and body text from visited pages. Smart validation rejects low-quality content (search results, login pages, error pages, listing pages). Generates AI summaries using Gemini Nano in key-points format. Extracts 2-4 topics per page using structured JSON output. Creates 768-dimensional vector embeddings for both topics and content.
 
-## Contributing
+### Knowledge Graph Construction
+Merges similar topics using 0.92 cosine similarity threshold. Connects related topics with edges at 0.86 minimum similarity. Enforces maximum 5 edges per node to prevent visual clutter. Deduplicates by URL and semantic similarity. Triggers 3D position recomputation after graph updates.
 
-Contributions welcome! This project is part of the Chrome Built-in AI Challenge 2025.
+### 3D Visualization
+Renders topics as glowing spheres in 3D space using instanced meshes for performance. Positions computed via PCA (768D to 100D) followed by UMAP (100D to 3D). Bloom effects highlight search results. Interactive camera controls with smooth animations. Theme-aware rendering for dark and light modes. Click interactions reveal related pages.
+
+### Semantic Search
+Converts natural language queries to embeddings. Finds top 5 similar topics and top 10 similar items with 0.8 similarity threshold. Highlights results in 3D space with automatic camera focus. Displays edges between highlighted topics.
+
+### RAG-Powered Insights
+Streams contextual summaries about user queries. Counts related pages and mentions key themes. Suggests actionable next steps with hyperlinked references to specific pages. Operates entirely on-device using Chrome's Prompt API.
+
+### Inspect View
+Table view of all topics and items. Sortable by usage count and creation date. Direct links to original pages.
+
+## Architecture
+
+### Vector Embeddings
+768-dimensional embeddings stored as ArrayBuffer in IndexedDB. Used for semantic similarity computation across both topics and items. Enables topic merging and content search.
+
+### UMAP Dimensionality Reduction
+Flow: 768D embeddings → PCA to 100D → UMAP to 3D coordinates. Parameters: nNeighbors = min(15, topics/2), minDist = 0.1, spread = 1.0. Normalized to [-10, 10] cube for rendering.
+
+### Topic Extraction and Merging
+LLM with JSON schema constraint outputs 2-4 topics per page. First topic represents core concept (specific, not broad). Remaining topics are related concepts. Similarity matrix computation identifies duplicates at 0.92 threshold for automatic merging.
+
+### Graph Edge Creation
+When new topics are inserted, compute similarity against all existing topics. Create edges for pairs exceeding 0.86 similarity. Sort by similarity and enforce maximum 5 edges per node.
+
+### Offscreen Document Pattern
+Service workers cannot execute WASM. Embedding model hosted in persistent offscreen document. Communication via chrome.runtime.sendMessage. Ensures embedding generation remains available throughout extension lifecycle.
+
+## Known Limitations
+
+- **Auto-extraction mode**: Currently in beta. Requires additional testing for edge cases and reliability improvements.
+- **3D graph performance**: Not fully optimized. Observable lag when adding new nodes due to UMAP recomputation on the full graph.
+
+## Future Work
+
+- Performance optimization for 3D graph rendering and UMAP incremental updates
+- Multi-language support for international content
+- Export and import capabilities for knowledge graph portability
+- Advanced filtering and temporal analytics
+- Collaborative knowledge sharing between users
+- Mobile companion application for cross-device access

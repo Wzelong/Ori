@@ -24,7 +24,18 @@ export function StatsBar({ status }: StatsBarProps) {
 
     loadStats()
     const interval = setInterval(loadStats, 3000)
-    return () => clearInterval(interval)
+
+    const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      if (changes.lastInsertionTime) {
+        loadStats()
+      }
+    }
+
+    chrome.storage.onChanged.addListener(listener)
+    return () => {
+      clearInterval(interval)
+      chrome.storage.onChanged.removeListener(listener)
+    }
   }, [])
 
   const getStatusColor = () => {
@@ -44,15 +55,15 @@ export function StatsBar({ status }: StatsBarProps) {
       <div className="px-4 py-2 border-b bg-muted/30">
         <div className="flex items-center justify-between gap-3">
           {/* Status on left */}
-          <div className="flex items-center gap-2">
-            <div className={`h-2 w-2 rounded-full transition-all duration-300 ${getStatusColor()}`} />
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <div className={`h-2 w-2 rounded-full flex-shrink-0 transition-all duration-300 ${getStatusColor()}`} />
             <span className="text-xs text-muted-foreground truncate">
               {getShortMessage()}
             </span>
           </div>
 
           {/* Stats badges on right */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Badge variant="outline" className="h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-default">

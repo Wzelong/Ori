@@ -68,5 +68,4 @@ export async function clearDatabase() {
     await db.topic_edges.clear();
     await db.vectors.clear();
   });
-  console.log('[db] Database cleared');
 }

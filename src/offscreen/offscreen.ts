@@ -1,8 +1,8 @@
-import { getEmbedding, getEmbeddings } from '../llm/embeddings'
+import { getEmbedding, getEmbeddings, computeSimilarity } from '../llm/embeddings'
+import { Tensor } from '@huggingface/transformers'
 
-console.log('[Offscreen] Model host initialized')
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_EMBEDDING') {
     getEmbedding(message.text)
       .then((embedding) => {
@@ -30,11 +30,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'WARMUP_MODEL') {
     getEmbedding('warmup')
       .then(() => {
-        console.log('[Offscreen] Model warmed up successfully')
         sendResponse({ success: true })
       })
       .catch((error) => {
         console.error('[Offscreen] warmup failed:', error)
+        sendResponse({ success: false, error: error.message })
+      })
+    return true
+  }
+
+  if (message.type === 'COMPUTE_SIMILARITY') {
+    const tensor = new Tensor('float32', new Float32Array(message.embeddings), message.shape)
+    computeSimilarity(tensor)
+      .then((similarityMatrix) => {
+        sendResponse({ success: true, similarityMatrix })
+      })
+      .catch((error) => {
+        console.error('[Offscreen] computeSimilarity failed:', error)
         sendResponse({ success: false, error: error.message })
       })
     return true

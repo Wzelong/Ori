@@ -46,3 +46,23 @@ export async function getGraphData(): Promise<GraphData> {
     edges
   };
 }
+
+export async function getItemsForTopic(topicId: string): Promise<Item[]> {
+  const itemTopicLinks = await db.item_topic
+    .where('topicId')
+    .equals(topicId)
+    .toArray();
+
+  const itemIds = itemTopicLinks.map(link => link.itemId);
+
+  if (itemIds.length === 0) {
+    return [];
+  }
+
+  const items = await db.items
+    .where('id')
+    .anyOf(itemIds)
+    .toArray();
+
+  return items.sort((a, b) => b.createdAt - a.createdAt);
+}

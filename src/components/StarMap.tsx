@@ -1,5 +1,5 @@
 // StarMap.tsx
-import { useRef, useMemo, useEffect, useState, Suspense } from 'react';
+import { useRef, useMemo, useEffect, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { CameraControls, Stars as DreiStars, Line, Html } from '@react-three/drei';
 import { EffectComposer, Bloom } from '@react-three/postprocessing';
@@ -13,6 +13,7 @@ interface StarMapProps {
   topics: TopicWithPosition[];
   highlightedTopics?: TopicSearchResult[];
   edges?: TopicEdge[];
+  onTopicClick?: (topic: TopicWithPosition) => void;
 }
 
 interface StarsProps {
@@ -24,11 +25,26 @@ interface StarsProps {
   materialKey: string;
   /** Optional global opacity for this mesh (applies to all its instances) */
   opacity?: number;
+  /** Make stars clickable */
+  clickable?: boolean;
+  /** Click handler */
+  onTopicClick?: (topic: TopicWithPosition) => void;
 }
 
-function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1 }: StarsProps) {
+function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, clickable = false, onTopicClick }: StarsProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const count = topics.length;
+  const [hovered, setHovered] = useState(false);
+  const pointerDownTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (clickable) {
+      document.body.style.cursor = hovered ? 'pointer' : 'default';
+    }
+    return () => {
+      document.body.style.cursor = 'default';
+    };
+  }, [hovered, clickable]);
 
   // temp holders
   const tempObj = useMemo(() => new THREE.Object3D(), []);
@@ -65,9 +81,6 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1 }: S
   useEffect(() => {
     if (!meshRef.current) return;
 
-    console.log('[Stars useEffect] Applying colors - isDark:', isDark, 'count:', count, 'first 3 colors:',
-      colors.slice(0, 9));
-
     for (let i = 0; i < count; i++) {
       tempObj.position.set(
         positions[i * 3 + 0],
@@ -89,9 +102,6 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1 }: S
     meshRef.current.instanceMatrix.needsUpdate = true;
     if (meshRef.current.instanceColor) {
       meshRef.current.instanceColor.needsUpdate = true;
-      console.log('[Stars useEffect] instanceColor updated, exists:', !!meshRef.current.instanceColor);
-    } else {
-      console.log('[Stars useEffect] WARNING: instanceColor is null!');
     }
 
     // Nudge material/program cache when theme switches
@@ -100,10 +110,37 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1 }: S
     }
   }, [positions, scales, colors, count, tempObj, tempColor, isDark]);
 
+  const handlePointerDown = () => {
+    if (clickable) {
+      pointerDownTimeRef.current = Date.now();
+    }
+  };
+
+  const handlePointerUp = (event: any) => {
+    if (!clickable || !onTopicClick) return;
+
+    const clickDuration = Date.now() - pointerDownTimeRef.current;
+    if (clickDuration > 200) return;
+
+    const instanceId = event.instanceId;
+    if (instanceId !== undefined && instanceId < topics.length) {
+      const clickedTopic = topics[instanceId];
+      onTopicClick(clickedTopic);
+    }
+  };
+
   if (count === 0) return null;
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, count]}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerOver={() => clickable && setHovered(true)}
+      onPointerOut={() => clickable && setHovered(false)}
+      onClick={(e) => e.stopPropagation()}
+    >
       <sphereGeometry args={[1, 16, 16]} />
       {isDark ? (
         <meshStandardMaterial
@@ -197,6 +234,7 @@ function Labels({ topics, isDark }: LabelsProps) {
           sprite
           transform
           occlude
+          zIndexRange={[100, 0]}
           style={{
             pointerEvents: 'none',
             userSelect: 'none'
@@ -220,29 +258,114 @@ function Labels({ topics, isDark }: LabelsProps) {
 }
 
 interface CameraAnimationProps {
-  target?: TopicWithPosition;
+  highlightedTopics: TopicWithPosition[];
+  allTopics: TopicWithPosition[];
 }
 
-function CameraAnimation({ target }: CameraAnimationProps) {
+function CameraAnimation({ highlightedTopics, allTopics }: CameraAnimationProps) {
   const controlsRef = useRef<any>(null);
 
+  const computeBounds = (topics: TopicWithPosition[]) => {
+    if (topics.length === 0) {
+      return { center: new THREE.Vector3(0, 0, 0), distance: 30 };
+    }
+
+    const bounds = {
+      minX: Infinity, maxX: -Infinity,
+      minY: Infinity, maxY: -Infinity,
+      minZ: Infinity, maxZ: -Infinity
+    };
+
+    for (const t of topics) {
+      bounds.minX = Math.min(bounds.minX, t.x);
+      bounds.maxX = Math.max(bounds.maxX, t.x);
+      bounds.minY = Math.min(bounds.minY, t.y);
+      bounds.maxY = Math.max(bounds.maxY, t.y);
+      bounds.minZ = Math.min(bounds.minZ, t.z);
+      bounds.maxZ = Math.max(bounds.maxZ, t.z);
+    }
+
+    const center = new THREE.Vector3(
+      (bounds.minX + bounds.maxX) / 2,
+      (bounds.minY + bounds.maxY) / 2,
+      (bounds.minZ + bounds.maxZ) / 2
+    );
+
+    const span = Math.max(
+      bounds.maxX - bounds.minX,
+      bounds.maxY - bounds.maxY,
+      bounds.maxZ - bounds.minZ
+    );
+
+    const distance = topics.length === 1
+      ? 15
+      : Math.max(35, span * 2.5);
+
+    return { center, distance };
+  };
+
+  const cameraTarget = useMemo(() => {
+    if (highlightedTopics.length === 0) {
+      return { ...computeBounds(allTopics), lookAt: null };
+    }
+
+    if (highlightedTopics.length === 1) {
+      const nearest = highlightedTopics[0];
+      return {
+        center: new THREE.Vector3(nearest.x, nearest.y, nearest.z),
+        distance: 15,
+        lookAt: null
+      };
+    }
+
+    const clusterBounds = computeBounds(highlightedTopics);
+    const nearest = highlightedTopics[0];
+    const nearestPos = new THREE.Vector3(nearest.x, nearest.y, nearest.z);
+    const clusterCenter = clusterBounds.center;
+
+    const direction = new THREE.Vector3()
+      .subVectors(nearestPos, clusterCenter)
+      .normalize();
+
+    const distance = 15;
+    const cameraPos = new THREE.Vector3()
+      .copy(nearestPos)
+      .add(direction.multiplyScalar(distance));
+
+    return {
+      center: cameraPos,
+      distance: 0,
+      lookAt: clusterCenter
+    };
+  }, [highlightedTopics, allTopics]);
+
   useEffect(() => {
-    if (target && controlsRef.current) {
-      const distance = 15;
-      const offsetY = 3;
+    if (!controlsRef.current) return;
+
+    const { center, distance, lookAt } = cameraTarget;
+
+    if (lookAt) {
       controlsRef.current.setLookAt(
-        target.x,
-        target.y + offsetY,
-        target.z + distance,
-        target.x,
-        target.y,
-        target.z,
+        center.x,
+        center.y,
+        center.z,
+        lookAt.x,
+        lookAt.y,
+        lookAt.z,
         true
       );
-    } else if (!target && controlsRef.current) {
-      controlsRef.current.setLookAt(0, 0, 30, 0, 0, 0, true);
+    } else {
+      controlsRef.current.setLookAt(
+        center.x,
+        center.y,
+        center.z + distance,
+        center.x,
+        center.y,
+        center.z,
+        true
+      );
     }
-  }, [target]);
+  }, [cameraTarget]);
 
   return (
     <CameraControls
@@ -258,7 +381,7 @@ interface SceneProps extends StarMapProps {
   isDark: boolean;
 }
 
-function Scene({ topics, highlightedTopics, edges, isDark }: SceneProps) {
+function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick }: SceneProps) {
   const highlightedIds = useMemo(() => {
     if (!highlightedTopics) return new Set<string>();
     return new Set(highlightedTopics.map(r => r.topic.id));
@@ -270,25 +393,25 @@ function Scene({ topics, highlightedTopics, edges, isDark }: SceneProps) {
     return map;
   }, [topics]);
 
-  const nearestTopic = highlightedTopics?.[0]?.topic;
   const materialKey = isDark ? 'dark' : 'light';
   const bgColor = isDark ? '#020617' : '#ffffff';
 
   // Split into two meshes: highlighted vs normal (so we can dim non-highlighted)
   const { highlightedList, normalList } = useMemo(() => {
-    const highlightedList: TopicWithPosition[] = [];
-    const normalList: TopicWithPosition[] = [];
-    for (const t of topics) {
-      if (highlightedIds.has(t.id)) highlightedList.push(t);
-      else normalList.push(t);
+    if (!highlightedTopics || highlightedTopics.length === 0) {
+      return { highlightedList: [], normalList: topics };
     }
+
+    const highlightedList = highlightedTopics.map(r => r.topic);
+    const normalList = topics.filter(t => !highlightedIds.has(t.id));
+
     return { highlightedList, normalList };
-  }, [topics, highlightedIds]);
+  }, [topics, highlightedIds, highlightedTopics]);
 
   // Color/scale functions
   const highlightColor = useMemo(() => new THREE.Color('#0284c7'), []);
   const colorFnHighlighted = () => highlightColor;
-  const colorFnNormal = (t: TopicWithPosition) => {
+  const colorFnNormal = () => {
     return new THREE.Color('#0284c7');
   };
 
@@ -296,7 +419,9 @@ function Scene({ topics, highlightedTopics, edges, isDark }: SceneProps) {
   const scaleFnNormal = () => (isDark ? 0.08 : 0.12);
 
   // Dim normal stars when there are highlights
-  const normalOpacity = highlightedList.length > 0 ? 0.2 : 1.0;
+  const normalOpacity = highlightedList.length > 0
+    ? (isDark ? 0.2 : 0.6)
+    : 1.0;
 
   return (
     <>
@@ -338,6 +463,8 @@ function Scene({ topics, highlightedTopics, edges, isDark }: SceneProps) {
           isDark={isDark}
           materialKey={materialKey + '-highlight'}
           opacity={1}
+          clickable={true}
+          onTopicClick={onTopicClick}
         />
       )}
 
@@ -345,12 +472,12 @@ function Scene({ topics, highlightedTopics, edges, isDark }: SceneProps) {
         <Edges edges={edges} topicMap={topicMap} isDark={isDark} />
       )}
 
-      <CameraAnimation target={nearestTopic} />
+      <CameraAnimation highlightedTopics={highlightedList} allTopics={topics} />
     </>
   );
 }
 
-export function StarMap({ topics, highlightedTopics, edges }: StarMapProps) {
+export function StarMap({ topics, highlightedTopics, edges, onTopicClick }: StarMapProps) {
   const [bloomReady, setBloomReady] = useState(false);
   const { resolvedTheme } = useTheme();
   const [isDark, setIsDark] = useState(true);
@@ -364,7 +491,6 @@ export function StarMap({ topics, highlightedTopics, edges }: StarMapProps) {
       const domIsDark = htmlElement.classList.contains('dark');
       const themeIsDark = resolvedTheme === 'dark';
       const actualIsDark = domIsDark || themeIsDark;
-      console.log('[StarMap checkTheme] domIsDark:', domIsDark, 'themeIsDark:', themeIsDark, 'actualIsDark:', actualIsDark, 'setting isDark to:', actualIsDark);
       setIsDark(actualIsDark);
     };
 
@@ -403,6 +529,7 @@ export function StarMap({ topics, highlightedTopics, edges }: StarMapProps) {
         highlightedTopics={highlightedTopics}
         edges={edges}
         isDark={isDark}
+        onTopicClick={onTopicClick}
       />
       {bloomReady && (
         <EffectComposer>

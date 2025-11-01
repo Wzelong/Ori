@@ -1,24 +1,31 @@
-import { runPipeline } from './services/pipeline'
 
-console.log('[Content] Ori content script loaded')
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'PING') {
+    sendResponse({ ready: true })
+    return true
+  }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'EXTRACT_PAGE') {
-    console.log('[Content] Received extraction request')
 
-    chrome.storage.local.set({ extractionStatus: 'extracting' })
+    const pageData = {
+      title: document.title,
+      url: window.location.href,
+      text: document.body.innerText
+    }
 
-    runPipeline()
-      .then((success) => {
-        console.log('[Content] Extraction completed:', success)
-        chrome.storage.local.set({ extractionStatus: 'idle' })
-        sendResponse({ success: true })
-      })
-      .catch((error) => {
-        console.error('[Content] Extraction failed:', error)
-        chrome.storage.local.set({ extractionStatus: 'idle' })
-        sendResponse({ success: false, error: error.message })
-      })
+
+    chrome.runtime.sendMessage({
+      type: 'PROCESS_EXTRACTION',
+      pageData
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('[Content] Error sending to background:', chrome.runtime.lastError)
+        sendResponse({ success: false, error: chrome.runtime.lastError.message })
+        return
+      }
+
+      sendResponse(response)
+    })
 
     return true
   }

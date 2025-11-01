@@ -1,3 +1,8 @@
+import { extractPageResultFromData } from '../services/extract'
+import { insertPageResult } from '../services/insert'
+import { isUrlExcluded } from '../lib/urlExclusions'
+import { db } from '../db/database'
+
 // =============================================================================
 // OFFSCREEN DOCUMENT - Hosts embedding model in persistent DOM context
 // Bypasses Service Worker WASM limitations
@@ -48,66 +53,162 @@ const DEBOUNCE_DELAY = 2000
 const DUPLICATE_WINDOW = 60000
 
 const extractionHistory = new Map<number, { url: string; timestamp: number }>()
-const debounceTimers = new Map<number, NodeJS.Timeout>()
 
-async function shouldExtract(tabId: number, url: string): Promise<boolean> {
-  const { autoExtract } = await chrome.storage.local.get(['autoExtract'])
-  if (!autoExtract) {
-    console.log('[Background] Auto-extract disabled')
-    return false
+async function isContentScriptReady(tabId: number, retries = 3): Promise<boolean> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await chrome.tabs.sendMessage(tabId, { type: 'PING' })
+      return true
+    } catch (error) {
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+    }
   }
-
-  const lastExtraction = extractionHistory.get(tabId)
-  if (lastExtraction?.url === url && Date.now() - lastExtraction.timestamp < DUPLICATE_WINDOW) {
-    console.log('[Background] Skipping duplicate extraction:', url)
-    return false
-  }
-
-  return true
+  return false
 }
 
-async function triggerExtraction(tabId: number, url: string) {
+async function triggerExtraction() {
+  let messageStarted = false
   try {
-    console.log('[Background] Triggering auto-extract for:', url)
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+
+    const tab = tabs[0]
+
+    if (!tab?.id || !tab.url) {
+      return
+    }
+
+    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+      return
+    }
+
+
+    const lastExtraction = extractionHistory.get(tab.id)
+    if (lastExtraction?.url === tab.url && Date.now() - lastExtraction.timestamp < DUPLICATE_WINDOW) {
+      return
+    }
+
     await ensureOffscreenDocument()
-    await chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_PAGE' })
-    extractionHistory.set(tabId, { url, timestamp: Date.now() })
+
+    const ready = await isContentScriptReady(tab.id)
+    if (!ready) {
+      console.warn('[Background] Content script not ready, skipping extraction')
+      return
+    }
+
+    messageStarted = true
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_PAGE' })
+
+    if (response?.success) {
+      extractionHistory.set(tab.id, { url: tab.url, timestamp: Date.now() })
+    }
   } catch (error) {
     console.error('[Background] Auto-extraction failed:', error)
+    if (messageStarted) {
+    }
   }
 }
 
-async function handleTabUpdate(tabId: number, url: string) {
-  console.log('[Background] Tab update detected:', url)
-  if (!await shouldExtract(tabId, url)) return
+let debounceTimer: NodeJS.Timeout | null = null
 
-  if (debounceTimers.has(tabId)) {
-    clearTimeout(debounceTimers.get(tabId)!)
+async function handleTabUpdate() {
+  const { autoExtract, extractionStatus } = await chrome.storage.local.get(['autoExtract', 'extractionStatus'])
+
+
+  if (!autoExtract) {
+    return
   }
 
-  const timer = setTimeout(() => {
-    triggerExtraction(tabId, url)
-    debounceTimers.delete(tabId)
+  if (extractionStatus === 'extracting') {
+    return
+  }
+
+  if (debounceTimer) {
+    clearTimeout(debounceTimer)
+  }
+
+  debounceTimer = setTimeout(() => {
+    triggerExtraction()
+    debounceTimer = null
   }, DEBOUNCE_DELAY)
-
-  debounceTimers.set(tabId, timer)
 }
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
-    handleTabUpdate(tabId, tab.url)
+    handleTabUpdate()
   }
 })
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   const tab = await chrome.tabs.get(activeInfo.tabId)
   if (tab.url && tab.status === 'complete') {
-    handleTabUpdate(activeInfo.tabId, tab.url)
+    handleTabUpdate()
   }
 })
 
 chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
   if (details.frameId === 0) {
-    handleTabUpdate(details.tabId, details.url)
+    handleTabUpdate()
+  }
+})
+
+let extractionTimeout: NodeJS.Timeout | null = null
+
+const resetExtractionStatus = () => {
+  if (extractionTimeout) {
+    clearTimeout(extractionTimeout)
+    extractionTimeout = null
+  }
+  chrome.storage.local.set({ extractionStatus: 'idle' })
+}
+
+const setExtractionStatus = () => {
+  if (extractionTimeout) {
+    clearTimeout(extractionTimeout)
+  }
+  chrome.storage.local.set({ extractionStatus: 'extracting' })
+
+  extractionTimeout = setTimeout(() => {
+    console.warn('[Background] Extraction timeout - forcing reset after 30s')
+    resetExtractionStatus()
+  }, 30000)
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'PROCESS_EXTRACTION') {
+    setExtractionStatus()
+
+    ;(async () => {
+      try {
+        const url = message.pageData.url
+
+        const exclusionCheck = await isUrlExcluded(url)
+        if (exclusionCheck.excluded) {
+          resetExtractionStatus()
+          sendResponse({ success: false, error: `URL excluded: ${exclusionCheck.reason}` })
+          return
+        }
+
+        const existing = await db.items.where('link').equals(url).first()
+        if (existing) {
+          resetExtractionStatus()
+          sendResponse({ success: false, error: 'Page already extracted' })
+          return
+        }
+
+        const pageResult = await extractPageResultFromData(message.pageData)
+        const item = await insertPageResult(pageResult)
+        resetExtractionStatus()
+        sendResponse({ success: true, itemId: item?.id })
+      } catch (error) {
+        console.error('[Background] Extraction processing failed:', error)
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        resetExtractionStatus()
+        sendResponse({ success: false, error: errorMessage })
+      }
+    })()
+
+    return true
   }
 })

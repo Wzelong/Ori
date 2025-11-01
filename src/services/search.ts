@@ -1,6 +1,6 @@
 import { db } from '../db/database';
 import { loadVector } from '../llm/embeddings';
-import type { Topic, Item, TopicWithPosition, SearchResult } from '../types/schema';
+import type { Item, TopicWithPosition } from '../types/schema';
 
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) {

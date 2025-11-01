@@ -17,7 +17,7 @@ export async function generateText(
 
   const session = await (self as any).LanguageModel.create({
     initialPrompts,
-    temperature: 0.1,
+    temperature: 0.5,
     topK: 1,
   });
 
@@ -26,4 +26,29 @@ export async function generateText(
     : undefined;
 
   return await session.prompt(userPrompt, promptOptions);
+}
+
+export async function generateTextStreaming(
+  userPrompt: string,
+  options?: {
+    systemPrompt?: string;
+  }
+): Promise<ReadableStream<string>> {
+  const availability = await (self as any).LanguageModel.availability();
+
+  if (availability === 'unavailable') {
+    throw new Error('Language Model API is unavailable');
+  }
+
+  const initialPrompts = options?.systemPrompt
+    ? [{ role: 'system', content: options.systemPrompt }]
+    : [];
+
+  const session = await (self as any).LanguageModel.create({
+    initialPrompts,
+    temperature: 0.5,
+    topK: 1,
+  });
+
+  return session.promptStreaming(userPrompt);
 }

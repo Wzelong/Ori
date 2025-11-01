@@ -6,11 +6,15 @@ import { DeleteDatabaseButton } from './components/DeleteDatabaseButton'
 import { ThemeToggle } from './components/ThemeToggle'
 import { StatsBar } from './components/StatsBar'
 import { ExploreInput } from './components/ExploreInput'
+import { ItemCard } from './components/ItemCard'
+import { InspectView } from './components/InspectView'
+import { InsightStream } from './components/InsightStream'
 import { StarMap } from '@/components/StarMap'
 import { db } from '@/db/database'
-import type { TopicWithPosition, TopicEdge } from '@/types/schema'
-import { getEmbedding } from '@/llm/embeddings'
-import { findSimilarTopics, type TopicSearchResult } from '@/services/search'
+import type { TopicWithPosition, TopicEdge, Item } from '@/types/schema'
+import { findSimilarTopics, findSimilarItems, type TopicSearchResult } from '@/services/search'
+import { getItemsForTopic } from '@/services/graph'
+import { generateInsight } from '@/services/rag'
 
 const MAX_EDGES = 20
 
@@ -20,7 +24,11 @@ export default function App() {
   const [topics, setTopics] = useState<TopicWithPosition[]>([])
   const [highlightedTopics, setHighlightedTopics] = useState<TopicSearchResult[] | undefined>()
   const [edges, setEdges] = useState<TopicEdge[] | undefined>()
-  const [isSearching, setIsSearching] = useState(false)
+  const [selectedTopic, setSelectedTopic] = useState<TopicWithPosition | null>(null)
+  const [topicItems, setTopicItems] = useState<Item[]>([])
+  const [insightStream, setInsightStream] = useState<ReadableStream<string> | null>(null)
+  const [insightItemMap, setInsightItemMap] = useState<Map<string, string>>(new Map())
+  const [isWaitingForInsight, setIsWaitingForInsight] = useState(false)
 
   useEffect(() => {
     const loadTopics = async () => {
@@ -35,13 +43,23 @@ export default function App() {
     loadTopics()
 
     const interval = setInterval(loadTopics, 2000)
-    return () => clearInterval(interval)
+
+    const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
+      if (changes.lastInsertionTime) {
+        loadTopics()
+      }
+    }
+
+    chrome.storage.onChanged.addListener(listener)
+    return () => {
+      clearInterval(interval)
+      chrome.storage.onChanged.removeListener(listener)
+    }
   }, [])
 
   const handleSearch = async (query: string) => {
     try {
-      setIsSearching(true)
-      console.log('[explore] Searching for:', query)
+      setIsWaitingForInsight(true)
 
       const response = await chrome.runtime.sendMessage({
         type: 'GET_EMBEDDING',
@@ -52,15 +70,16 @@ export default function App() {
         throw new Error(response.error || 'Failed to get embedding')
       }
 
-      console.log('[explore] Embedding received, finding similar topics...')
 
-      const results = await findSimilarTopics(response.embedding, 5, 0.3)
+      const [topicResults, itemResults] = await Promise.all([
+        findSimilarTopics(response.embedding, 5, 0.8),
+        findSimilarItems(response.embedding, 10, 0.8)
+      ])
 
-      console.log('[explore] Found', results.length, 'similar topics')
-      setHighlightedTopics(results)
+      setHighlightedTopics(topicResults)
 
-      if (results.length > 0) {
-        const topicIds = new Set(results.map(r => r.topic.id))
+      if (topicResults.length > 0) {
+        const topicIds = new Set(topicResults.map(r => r.topic.id))
 
         const allEdges = await db.topic_edges.toArray()
         const relevantEdges = allEdges
@@ -68,16 +87,42 @@ export default function App() {
           .sort((a, b) => b.similarity - a.similarity)
           .slice(0, MAX_EDGES)
 
-        console.log('[explore] Found', relevantEdges.length, 'edges between highlighted topics')
         setEdges(relevantEdges)
       } else {
         setEdges(undefined)
       }
+
+      const { stream, itemMap } = await generateInsight(query, itemResults)
+      setInsightStream(stream)
+      setInsightItemMap(itemMap)
     } catch (error) {
       console.error('[explore] Search error:', error)
-    } finally {
-      setIsSearching(false)
     }
+  }
+
+  const handleClear = () => {
+    setHighlightedTopics(undefined)
+    setEdges(undefined)
+    setInsightStream(null)
+    setInsightItemMap(new Map())
+    setIsWaitingForInsight(false)
+  }
+
+  const handleCloseInsight = () => {
+    setInsightStream(null)
+    setInsightItemMap(new Map())
+    setIsWaitingForInsight(false)
+  }
+
+  const handleTopicClick = async (topic: TopicWithPosition) => {
+    setSelectedTopic(topic)
+    const items = await getItemsForTopic(topic.id)
+    setTopicItems(items)
+  }
+
+  const handleCloseCard = () => {
+    setSelectedTopic(null)
+    setTopicItems([])
   }
 
   return (
@@ -97,18 +142,46 @@ export default function App() {
         {view === 'explore' ? (
           <>
             <div className="absolute inset-0">
-              <StarMap topics={topics} highlightedTopics={highlightedTopics} edges={edges} />
+              <StarMap
+                topics={topics}
+                highlightedTopics={highlightedTopics}
+                edges={edges}
+                onTopicClick={handleTopicClick}
+              />
             </div>
-            <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none">
-              <div className="pointer-events-auto">
-                <ExploreInput onSearch={handleSearch} isSearching={isSearching} />
+            {(isWaitingForInsight || insightStream) && (
+              <div className="absolute top-0 left-0 right-0 z-[9998]">
+                <InsightStream
+                  stream={insightStream}
+                  isWaiting={isWaitingForInsight}
+                  itemMap={insightItemMap}
+                  onClose={handleCloseInsight}
+                  onComplete={() => setIsWaitingForInsight(false)}
+                />
               </div>
+            )}
+            <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none flex flex-col-reverse gap-3 z-[9999]">
+              <div className="pointer-events-auto">
+                <ExploreInput
+                  onSearch={handleSearch}
+                  onInputChange={handleClear}
+                  isSearching={false}
+                  hasResults={highlightedTopics !== undefined && highlightedTopics.length > 0}
+                />
+              </div>
+              {selectedTopic && (
+                <div className="pointer-events-auto">
+                  <ItemCard
+                    topic={selectedTopic}
+                    items={topicItems}
+                    onClose={handleCloseCard}
+                  />
+                </div>
+              )}
             </div>
           </>
         ) : (
-          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-            Inspect View
-          </div>
+          <InspectView />
         )}
       </div>
     </div>

@@ -39,3 +39,20 @@ export async function warmupModel(): Promise<void> {
     throw new Error(response.error || 'Failed to warmup model')
   }
 }
+
+export async function computeSimilarityFromOffscreen(embeddings: Tensor): Promise<number[][]> {
+  const shape = embeddings.dims as number[]
+  const data = embeddings.data as Float32Array
+
+  const response = await chrome.runtime.sendMessage({
+    type: 'COMPUTE_SIMILARITY',
+    embeddings: Array.from(data),
+    shape,
+  })
+
+  if (!response.success) {
+    throw new Error(response.error || 'Failed to compute similarity')
+  }
+
+  return response.similarityMatrix
+}

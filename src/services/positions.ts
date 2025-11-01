@@ -4,12 +4,10 @@ import { computeTopicPositions } from './dimensionality';
 import type { Topic } from '../types/schema';
 
 export async function recomputeAllTopicPositions(): Promise<void> {
-  console.log('[positions] Starting recomputation...');
 
   const topics = await db.topics.toArray();
 
   if (topics.length === 0) {
-    console.log('[positions] No topics to process');
     return;
   }
 
@@ -27,7 +25,6 @@ export async function recomputeAllTopicPositions(): Promise<void> {
     }
   }
 
-  console.log(`[positions] Computing positions for ${validTopics.length} topics...`);
 
   const positions = await computeTopicPositions(validEmbeddings);
 
@@ -40,7 +37,6 @@ export async function recomputeAllTopicPositions(): Promise<void> {
     }
   });
 
-  console.log('[positions] Recomputation complete');
 }
 
 export async function shouldRecomputePositions(): Promise<boolean> {

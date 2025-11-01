@@ -4,11 +4,24 @@ import { db } from '../db/database';
 import { isUrlExcluded } from '../lib/urlExclusions';
 
 async function getActiveTabUrl(): Promise<string> {
-  if (typeof chrome !== 'undefined' && chrome.tabs) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tab.url || window.location.href;
+  const isExtensionPage = typeof window !== 'undefined' &&
+    window.location.href.startsWith('chrome-extension://');
+
+  if (isExtensionPage && typeof chrome !== 'undefined' && chrome.tabs) {
+    const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    for (const tab of tabs) {
+      if (tab.url && !tab.url.startsWith('chrome-extension://') && !tab.url.startsWith('chrome://')) {
+        return tab.url;
+      }
+    }
+    throw new Error('No valid web page tab found');
   }
-  return window.location.href;
+
+  if (typeof window !== 'undefined' && typeof window.location !== 'undefined') {
+    return window.location.href;
+  }
+
+  throw new Error('Cannot determine current URL');
 }
 
 export async function runPipeline(): Promise<boolean> {
@@ -16,21 +29,17 @@ export async function runPipeline(): Promise<boolean> {
 
   const exclusionCheck = await isUrlExcluded(currentUrl);
   if (exclusionCheck.excluded) {
-    console.log('[pipeline] URL excluded:', currentUrl, 'Pattern:', exclusionCheck.reason);
     return false;
   }
 
   const existing = await db.items.where('link').equals(currentUrl).first();
   if (existing) {
-    console.log('[pipeline] Page already extracted, skipping:', currentUrl);
     return false;
   }
 
   const pageResult = await extractPageResult();
-  console.log('[pipeline] Extracted:', pageResult);
 
-  const item = await insertPageResult(pageResult);
-  console.log('[pipeline] Inserted item:', item);
+  await insertPageResult(pageResult);
 
   return true;
 }

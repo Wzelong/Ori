@@ -18,10 +18,12 @@ function resize(textarea: HTMLTextAreaElement) {
 
 interface ExploreInputProps {
   onSearch: (query: string) => Promise<void>
+  onInputChange?: () => void
   isSearching?: boolean
+  hasResults?: boolean
 }
 
-export function ExploreInput({ onSearch, isSearching = false }: ExploreInputProps) {
+export function ExploreInput({ onSearch, onInputChange, isSearching = false, hasResults = false }: ExploreInputProps) {
   const [input, setInput] = useState('')
   const [isExpanded, setIsExpanded] = useState(false)
   const [isFocused, setIsFocused] = useState(false)
@@ -43,9 +45,13 @@ export function ExploreInput({ onSearch, isSearching = false }: ExploreInputProp
   const handleSendMessage = async () => {
     if (!input.trim() || isSearching) return
     const query = input.trim()
+    await onSearch(query)
     setInput('')
     setIsExpanded(false)
-    await onSearch(query)
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '0px'
+      resize(textareaRef.current)
+    }
   }
 
   return (
@@ -65,7 +71,14 @@ export function ExploreInput({ onSearch, isSearching = false }: ExploreInputProp
         rows={1}
         value={input}
         placeholder="Explore the stars..."
-        onChange={(e) => setInput(e.target.value)}
+        onChange={(e) => {
+          const newValue = e.target.value
+          setInput(newValue)
+
+          if (hasResults && onInputChange) {
+            onInputChange()
+          }
+        }}
         onInput={(e) => {
           const ta = e.target as HTMLTextAreaElement
           resize(ta)
