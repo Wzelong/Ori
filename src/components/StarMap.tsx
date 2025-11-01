@@ -264,6 +264,7 @@ interface CameraAnimationProps {
 
 function CameraAnimation({ highlightedTopics, allTopics }: CameraAnimationProps) {
   const controlsRef = useRef<any>(null);
+  const previousTargetRef = useRef<string>('');
 
   const computeBounds = (topics: TopicWithPosition[]) => {
     if (topics.length === 0) {
@@ -342,6 +343,12 @@ function CameraAnimation({ highlightedTopics, allTopics }: CameraAnimationProps)
   useEffect(() => {
     if (!controlsRef.current) return;
 
+    const highlightedIds = highlightedTopics.map(t => t.id).sort().join(',');
+    const targetKey = `${highlightedIds}:${allTopics.length}`;
+
+    if (previousTargetRef.current === targetKey) return;
+    previousTargetRef.current = targetKey;
+
     const { center, distance, lookAt } = cameraTarget;
 
     if (lookAt) {
@@ -365,7 +372,7 @@ function CameraAnimation({ highlightedTopics, allTopics }: CameraAnimationProps)
         true
       );
     }
-  }, [cameraTarget]);
+  }, [cameraTarget, highlightedTopics, allTopics.length]);
 
   return (
     <CameraControls
