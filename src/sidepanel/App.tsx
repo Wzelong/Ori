@@ -1,107 +1,116 @@
-import { useState, useEffect, useMemo } from 'react';
-import { runPipeline } from '../services/pipeline';
-import { getEmbedding } from '../llm/embeddings';
-import { clearDatabase } from '../db/database';
-import { getGraphData, calculateHierarchicalLayout, type GraphData } from '../services/graph';
-import { Button } from '@/components/ui/button';
-import GraphView from '../components/GraphView';
+import { useState, useEffect } from 'react'
+import { ExtractControl } from '@/popup/components/ExtractControl'
+import { useExtraction } from '@/hooks/useExtraction'
+import { ViewSelector } from './components/ViewSelector'
+import { DeleteDatabaseButton } from './components/DeleteDatabaseButton'
+import { ThemeToggle } from './components/ThemeToggle'
+import { StatsBar } from './components/StatsBar'
+import { ExploreInput } from './components/ExploreInput'
+import { StarMap } from '@/components/StarMap'
+import { db } from '@/db/database'
+import type { TopicWithPosition, TopicEdge } from '@/types/schema'
+import { getEmbedding } from '@/llm/embeddings'
+import { findSimilarTopics, type TopicSearchResult } from '@/services/search'
+
+const MAX_EDGES = 20
 
 export default function App() {
-  const [modelLoading, setModelLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
-  const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const [error, setError] = useState<string>('');
-
-  const layout = useMemo(() => {
-    if (!graphData) return null;
-    return calculateHierarchicalLayout(graphData);
-  }, [graphData]);
-
-  const loadGraph = async () => {
-    try {
-      const data = await getGraphData();
-      console.log(data);
-      setGraphData(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load graph');
-    }
-  };
+  const extraction = useExtraction()
+  const [view, setView] = useState<'explore' | 'inspect'>('explore')
+  const [topics, setTopics] = useState<TopicWithPosition[]>([])
+  const [highlightedTopics, setHighlightedTopics] = useState<TopicSearchResult[] | undefined>()
+  const [edges, setEdges] = useState<TopicEdge[] | undefined>()
+  const [isSearching, setIsSearching] = useState(false)
 
   useEffect(() => {
-    getEmbedding('warmup')
-      .then(() => setModelLoading(false))
-      .catch((err) => {
-        setError(err.message);
-        setModelLoading(false);
-      });
+    const loadTopics = async () => {
+      const allTopics = await db.topics.toArray()
+      const withPositions = allTopics.filter(
+        (t): t is TopicWithPosition =>
+          t.x !== undefined && t.y !== undefined && t.z !== undefined
+      )
+      setTopics(withPositions)
+    }
 
-    loadGraph();
-  }, []);
+    loadTopics()
 
-  const handleProcess = async () => {
-    setProcessing(true);
-    setError('');
+    const interval = setInterval(loadTopics, 2000)
+    return () => clearInterval(interval)
+  }, [])
 
+  const handleSearch = async (query: string) => {
     try {
-      await runPipeline();
-      await loadGraph();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Processing failed');
+      setIsSearching(true)
+      console.log('[explore] Searching for:', query)
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'GET_EMBEDDING',
+        text: query
+      })
+
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to get embedding')
+      }
+
+      console.log('[explore] Embedding received, finding similar topics...')
+
+      const results = await findSimilarTopics(response.embedding, 5, 0.3)
+
+      console.log('[explore] Found', results.length, 'similar topics')
+      setHighlightedTopics(results)
+
+      if (results.length > 0) {
+        const topicIds = new Set(results.map(r => r.topic.id))
+
+        const allEdges = await db.topic_edges.toArray()
+        const relevantEdges = allEdges
+          .filter(edge => topicIds.has(edge.src) && topicIds.has(edge.dst))
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, MAX_EDGES)
+
+        console.log('[explore] Found', relevantEdges.length, 'edges between highlighted topics')
+        setEdges(relevantEdges)
+      } else {
+        setEdges(undefined)
+      }
+    } catch (error) {
+      console.error('[explore] Search error:', error)
     } finally {
-      setProcessing(false);
+      setIsSearching(false)
     }
-  };
-
-  const handleClearDB = async () => {
-    if (!confirm('Clear entire database? This cannot be undone.')) return;
-
-    try {
-      await clearDatabase();
-      setGraphData(null);
-      setError('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to clear database');
-    }
-  };
+  }
 
   return (
     <div className="flex flex-col h-screen bg-background">
-      <div className="p-4 border-b space-y-2">
-        {modelLoading && (
-          <p className="text-xs text-muted-foreground">Loading model...</p>
-        )}
-
-        <div className="flex gap-2 items-center">
-          <Button onClick={handleProcess} disabled={modelLoading || processing} variant="outline">
-            {processing ? 'Processing...' : 'Process'}
-          </Button>
-          <Button onClick={handleClearDB} disabled={processing} variant="outline">
-            Clear DB
-          </Button>
-
-          {graphData && graphData.topics.length > 0 && (
-            <span className="text-xs text-muted-foreground ml-auto">
-              {graphData.topics.length} topics, {graphData.items.length} items
-            </span>
-          )}
+      <header className="flex items-center justify-between px-4 py-2.5 border-b">
+        <ViewSelector value={view} onValueChange={setView} />
+        <div className="flex items-center gap-1.5">
+          <ExtractControl extraction={extraction} compact />
+          <ThemeToggle />
+          <DeleteDatabaseButton />
         </div>
+      </header>
 
-        {error && (
-          <p className="text-sm text-destructive">{error}</p>
-        )}
-      </div>
+      <StatsBar status={extraction.status} />
 
-      <div className="flex-1 p-4 overflow-hidden">
-        {layout && graphData ? (
-          <GraphView layout={layout} graphData={graphData} />
+      <div className="flex-1 overflow-hidden relative">
+        {view === 'explore' ? (
+          <>
+            <div className="absolute inset-0">
+              <StarMap topics={topics} highlightedTopics={highlightedTopics} edges={edges} />
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 p-4 pointer-events-none">
+              <div className="pointer-events-auto">
+                <ExploreInput onSearch={handleSearch} isSearching={isSearching} />
+              </div>
+            </div>
+          </>
         ) : (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-muted-foreground">
-              {graphData ? 'No topics yet. Process a page to start.' : 'Loading...'}
-            </p>
+          <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
+            Inspect View
           </div>
         )}
       </div>
     </div>
-  );
+  )
 }

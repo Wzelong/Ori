@@ -43,6 +43,18 @@ export class GraphDB extends Dexie {
         createdAt
       `
     });
+
+    this.version(2).stores({
+      topics: `
+        id,
+        &label,
+        uses,
+        createdAt,
+        x,
+        y,
+        z
+      `
+    });
   }
 }
 

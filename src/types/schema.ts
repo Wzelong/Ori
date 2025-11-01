@@ -9,13 +9,14 @@ export interface PageResult {
 
 // Graph Database Types
 
-export type EdgeType = 'related_to' | 'broader_than';
-
 export interface Topic {
   id: string;
   label: string;
   uses: number;      // denormalized count of linked items
   createdAt: number;
+  x?: number;        // 3D position for visualization
+  y?: number;
+  z?: number;
 }
 
 export interface Item {
@@ -35,7 +36,6 @@ export interface TopicEdge {
   id: string;
   src: string;
   dst: string;
-  type: EdgeType;
   similarity: number;
   createdAt: number;
 }
@@ -45,4 +45,23 @@ export interface VectorRow {
   ownerId: string;
   buf: ArrayBuffer;
   createdAt: number;
+}
+
+// 3D Visualization Types
+
+export interface TopicWithPosition extends Topic {
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface SearchResult {
+  topic: TopicWithPosition;
+  similarity: number;
+}
+
+export interface StarMapData {
+  allTopics: TopicWithPosition[];
+  highlightedTopics?: SearchResult[];
+  edges?: TopicEdge[];
 }

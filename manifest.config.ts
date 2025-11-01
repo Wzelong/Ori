@@ -3,19 +3,19 @@ import pkg from './package.json'
 
 export default defineManifest({
   manifest_version: 3,
-  name: 'Trace',
+  name: 'Ori',
   description: 'Your personal knowledge graph powered by Chrome built-in AI. Automatically capture, summarize, and query your browsing history.',
   version: pkg.version,
   icons: {
-    16: 'public/icons/trace16.png',
-    48: 'public/icons/trace48.png',
-    128: 'public/icons/trace128.png',
+    16: 'public/icons/icon16.png',
+    48: 'public/icons/icon48.png',
+    128: 'public/icons/icon128.png',
   },
   action: {
     default_icon: {
-      16: 'public/icons/trace16.png',
-      48: 'public/icons/trace48.png',
-      128: 'public/icons/trace128.png',
+      16: 'public/icons/icon16.png',
+      48: 'public/icons/icon48.png',
+      128: 'public/icons/icon128.png',
     },
     default_popup: 'src/popup/index.html',
   },
@@ -30,6 +30,8 @@ export default defineManifest({
     'activeTab',
     'scripting',
     'downloads',
+    'webNavigation',
+    'offscreen',
   ],
   optional_permissions: [
     'history',
@@ -43,6 +45,13 @@ export default defineManifest({
     default_path: 'src/sidepanel/index.html',
   },
   options_page: 'src/options/index.html',
+  content_scripts: [
+    {
+      matches: ['<all_urls>'],
+      js: ['src/content.ts'],
+      run_at: 'document_end',
+    },
+  ],
   web_accessible_resources: [
     {
       resources: ['*.wasm', '*.mjs'],

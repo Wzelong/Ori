@@ -1,10 +1,10 @@
-# Trace — Chrome Built-in AI Challenge 2025
+# Ori — Chrome Built-in AI Challenge 2025
 
 Your personal knowledge graph powered by Chrome built-in AI. Automatically capture, summarize, and structure knowledge from web pages and YouTube videos into a private local knowledge graph.
 
 ## Overview
 
-Trace is a Chrome extension that leverages Gemini Nano's built-in AI APIs (Prompt API, Summarizer API, Translator API) to transform your browsing history into an intelligent, searchable knowledge base. All processing happens on-device for privacy and offline use.
+Ori is a Chrome extension that leverages Gemini Nano's built-in AI APIs (Prompt API, Summarizer API, Translator API) to transform your browsing history into an intelligent, searchable knowledge base. All processing happens on-device for privacy and offline use.
 
 ## Features
 
@@ -29,7 +29,7 @@ Trace is a Chrome extension that leverages Gemini Nano's built-in AI APIs (Promp
 ## Project Structure
 
 ```
-trace/
+ori/
 ├─ src/
 │  ├─ background/       # Service worker
 │  ├─ popup/            # Popup UI

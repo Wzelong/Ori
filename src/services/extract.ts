@@ -1,6 +1,6 @@
 import { summarize } from '../llm/summarizer';
 import { generateText } from '../llm/languageModel';
-import { getEmbedding, getEmbeddings } from '../llm/embeddings';
+import { getEmbeddingFromOffscreen, getEmbeddingsFromOffscreen } from '../llm/offscreenClient';
 import type { PageResult } from '../types/schema';
 
 async function extractPageContent() {
@@ -26,6 +26,52 @@ async function extractPageContent() {
   return results[0].result;
 }
 
+const VALIDATION_SCHEMA = {
+  type: 'object',
+  properties: {
+    isValid: { type: 'boolean' },
+    reason: { type: 'string' },
+    confidence: { type: 'number' }
+  },
+  required: ['isValid', 'reason']
+};
+
+async function validateContentQuality(text: string, url: string): Promise<{ isValid: boolean; reason: string }> {
+  const sampleText = text.slice(0, 3000);
+
+  const validationJson = await generateText(
+    `URL: ${url}\n\nContent preview:\n${sampleText}`,
+    {
+      systemPrompt: `You are a content quality validator. Determine if this page contains valuable content worth processing.
+
+REJECT (isValid: false) if the page is:
+- Search result pages (Google, Bing, Google Scholar, etc.)
+- Directory/listing pages (index pages, file listings, navigation pages)
+- Login/authentication pages (sign-in forms, auth pages)
+- Error pages (404, 500, access denied)
+- Pages with minimal or no substantial content
+- Aggregated links without original content
+
+ACCEPT (isValid: true) if the page has:
+- Substantial article content (blog posts, articles, documentation, research papers)
+- Educational/informational value (tutorials, guides, explanations)
+- Structured information with clear topics/sections
+- Original content (not just metadata or links)
+
+Return JSON with:
+- isValid: boolean (true if content should be processed)
+- reason: string (brief explanation of decision)
+- confidence: number (0-1, how confident you are)
+
+Be strict - when in doubt, reject.`,
+      schema: VALIDATION_SCHEMA
+    }
+  );
+
+  const validation = JSON.parse(validationJson);
+  return { isValid: validation.isValid, reason: validation.reason };
+}
+
 const METADATA_SCHEMA = {
   type: 'object',
   properties: {
@@ -44,12 +90,18 @@ export async function extractPageResult(): Promise<PageResult> {
   // 1. Extract page content
   const extracted = await extractPageContent();
 
+  // 2. Validate content quality
+  const validation = await validateContentQuality(extracted.text, extracted.url);
+  if (!validation.isValid) {
+    throw new Error(`Content validation failed: ${validation.reason}`);
+  }
+
   const summarizerText = extracted.text.slice(0, 20000);
 
-  // 2. Generate summary first
+  // 3. Generate summary
   const summary = await summarize(summarizerText);
 
-  // 3. Extract topics from summary
+  // 4. Extract topics from summary
   const userPrompt = `Original title: ${extracted.title}
 
 Summary:
@@ -88,10 +140,10 @@ Return clean, valid JSON only.
 
   const metadata = JSON.parse(metadataJson);
 
-  // 4. Create embeddings
-  const topicEmbeddingsTensor = await getEmbeddings(metadata.topics);
+  // 5. Create embeddings
+  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(metadata.topics);
   const topicEmbeddings = topicEmbeddingsTensor.tolist() as number[][];
-  const contentEmbedding = await getEmbedding(`Title: ${metadata.title}\n\n${summary}`);
+  const contentEmbedding = await getEmbeddingFromOffscreen(`Title: ${metadata.title}\n\n${summary}`);
 
   return {
     title: metadata.title,
