@@ -42,16 +42,6 @@ export async function performRAGSearch(
     findSimilarItems(queryEmbedding, opts.itemCount, opts.itemThreshold)
   ])
 
-  console.log('Search Query:', query)
-  console.log('Topic Results:', topicResults.map(r => ({
-    label: r.topic.label,
-    similarity: r.similarity
-  })))
-  console.log('Item Results:', itemResults.map(r => ({
-    title: r.item.title,
-    similarity: r.similarity
-  })))
-
   const highlightedTopics = opts.expandNeighbors
     ? await expandTopicsWithNeighbors(topicResults, allTopics)
     : topicResults
@@ -159,7 +149,6 @@ OUTPUT RULES:
    - Both present (topics + pages): Give a short, helpful answer (MAX 2 concise sentences) grounded ONLY in Related_Pages' summaries.
      Citations MUST come immediately after the sentence period with NO spaces, parentheses, or commas.
      Format: "This is a sentence.**p1** Another sentence.**p2****p3**"
-     WRONG: "sentence. **p1**" or "sentence (**p1**)." or "sentence. (**p1**)."
      RIGHT: "sentence.**p1**" or "sentence.**p1****p2**"
    - No topics, pages present: Inform that topics were not found and answer from pages as above; end with **id**.
    - Topics present, no pages: Inform that pages were not found; DO NOT answer with topic-only facts.
@@ -173,9 +162,6 @@ OUTPUT RULES:
    - CORRECT examples:
      - "Review **A Tutorial on Matrix Factorization** for a step-by-step overview."
      - "Open **Implicit Feedback CF** to see handling of non-explicit signals."
-   - WRONG examples (DO NOT DO THIS):
-     - "Review **A Tutorial on Matrix Factorization** for a step-by-step overview.**p1**"
-     - "Open **Implicit Feedback CF** to see handling of non-explicit signals.[1]"
    - Action suggestions = NO citations. Factual claims = YES citations.
 
 4) Tone & style:

@@ -506,7 +506,7 @@ function CameraAnimation({ highlightedTopics, allTopics }: CameraAnimationProps)
 
     const distance = topics.length === 1
       ? 15
-      : span * 1.5;
+      : span * 2;
 
     return { center, distance };
   }, []);
@@ -629,8 +629,19 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick }: Scene
   const colorFnHighlighted = useCallback(() => highlightColor, [highlightColor]);
   const colorFnNormal = useCallback(() => normalColor, [normalColor]);
 
-  const scaleFnHighlighted = useCallback(() => 0.15, []);
-  const scaleFnNormal = useCallback(() => (isDark ? 0.08 : 0.12), [isDark]);
+  const scaleFnHighlighted = useCallback((topic: TopicWithPosition) => {
+    const minScale = 0.12;
+    const maxScale = 0.25;
+    const usesScale = Math.min(topic.uses / 20, 1);
+    return minScale + (maxScale - minScale) * usesScale;
+  }, []);
+
+  const scaleFnNormal = useCallback((topic: TopicWithPosition) => {
+    const baseMin = isDark ? 0.06 : 0.08;
+    const baseMax = isDark ? 0.15 : 0.18;
+    const usesScale = Math.min(topic.uses / 20, 1);
+    return baseMin + (baseMax - baseMin) * usesScale;
+  }, [isDark]);
 
   // Dim normal stars when there are highlights
   const normalOpacity = highlightedList.length > 0

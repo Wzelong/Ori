@@ -55,6 +55,18 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    if (highlightedTopics && highlightedTopics.length > 0) {
+      handleClear()
+    }
+  }, [topics.length])
+
+  useEffect(() => {
+    if (view === 'explore' && highlightedTopics && highlightedTopics.length > 0) {
+      handleClear()
+    }
+  }, [view])
+
   const handleSearch = async (query: string) => {
     try {
       setIsWaitingForInsight(true)
