@@ -27,6 +27,8 @@ export default function App() {
   const [insightStream, setInsightStream] = useState<ReadableStream<string> | null>(null)
   const [insightItemMap, setInsightItemMap] = useState<Map<string, string>>(new Map())
   const [isWaitingForInsight, setIsWaitingForInsight] = useState(false)
+  const [showingAllEdges, setShowingAllEdges] = useState(false)
+  const [showingAllLabels, setShowingAllLabels] = useState(false)
 
   useEffect(() => {
     const loadTopics = async () => {
@@ -104,6 +106,8 @@ export default function App() {
     setInsightStream(null)
     setInsightItemMap(new Map())
     setIsWaitingForInsight(false)
+    setHighlightedTopics(undefined)
+    setEdges(undefined)
   }
 
   const handleTopicClick = async (topic: TopicWithPosition) => {
@@ -117,6 +121,22 @@ export default function App() {
     setTopicItems([])
   }
 
+  const handleToggleEdges = async () => {
+    if (showingAllEdges) {
+      setEdges(undefined)
+      setHighlightedTopics(undefined)
+      setShowingAllEdges(false)
+    } else {
+      const allEdges = await db.topic_edges.toArray()
+      setEdges(allEdges)
+      setShowingAllEdges(true)
+    }
+  }
+
+  const handleToggleLabels = () => {
+    setShowingAllLabels(!showingAllLabels)
+  }
+
   return (
     <div className="flex flex-col h-screen bg-background">
       <header className="flex items-center justify-between px-4 py-2.5 border-b">
@@ -128,7 +148,13 @@ export default function App() {
         </div>
       </header>
 
-      <StatsBar status={extraction.status} />
+      <StatsBar
+        status={extraction.status}
+        onEdgeClick={handleToggleEdges}
+        showingEdges={showingAllEdges}
+        onTopicClick={handleToggleLabels}
+        showingAllLabels={showingAllLabels}
+      />
 
       <div className="flex-1 overflow-hidden relative">
         {view === 'explore' ? (
@@ -139,6 +165,7 @@ export default function App() {
                 highlightedTopics={highlightedTopics}
                 edges={edges}
                 onTopicClick={handleTopicClick}
+                showAllLabels={showingAllLabels}
               />
             </div>
             {(isWaitingForInsight || insightStream) && (

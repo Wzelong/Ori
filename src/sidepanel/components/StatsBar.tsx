@@ -7,9 +7,13 @@ import type { StatusState } from '@/hooks/useExtraction'
 
 interface StatsBarProps {
   status: StatusState
+  onEdgeClick?: () => void
+  showingEdges?: boolean
+  onTopicClick?: () => void
+  showingAllLabels?: boolean
 }
 
-export function StatsBar({ status }: StatsBarProps) {
+export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, showingAllLabels }: StatsBarProps) {
   const [stats, setStats] = useState({ topicCount: 0, itemCount: 0, edgeCount: 0 })
 
   useEffect(() => {
@@ -78,25 +82,41 @@ export function StatsBar({ status }: StatsBarProps) {
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="outline" className="h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-default">
+                <Badge
+                  variant={showingAllLabels ? "default" : "outline"}
+                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all ${
+                    showingAllLabels
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-accent hover:text-accent-foreground'
+                  }`}
+                  onClick={onTopicClick}
+                >
                   <Sparkle className="h-3 w-3" />
                   {stats.topicCount}
                 </Badge>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Topics</p>
+                <p>{showingAllLabels ? 'Hide labels' : 'Show all labels'}</p>
               </TooltipContent>
             </Tooltip>
 
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="outline" className="h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-default">
+                <Badge
+                  variant={showingEdges ? "default" : "outline"}
+                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all ${
+                    showingEdges
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-accent hover:text-accent-foreground'
+                  }`}
+                  onClick={onEdgeClick}
+                >
                   <Waypoints className="h-3 w-3" />
                   {stats.edgeCount}
                 </Badge>
               </TooltipTrigger>
               <TooltipContent>
-                <p>Edges</p>
+                <p>{showingEdges ? 'Hide edges' : 'Show all edges'}</p>
               </TooltipContent>
             </Tooltip>
           </div>

@@ -14,6 +14,7 @@ interface StarMapProps {
   highlightedTopics?: TopicSearchResult[];
   edges?: TopicEdge[];
   onTopicClick?: (topic: TopicWithPosition) => void;
+  showAllLabels?: boolean;
 }
 
 interface StarsProps {
@@ -264,7 +265,7 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesPro
 
   const lines = useMemo(() => {
     if (!centerNodeId) {
-      return edges.map(edge => {
+      return edges.map((edge, index) => {
         const src = topicMap.get(edge.src);
         const dst = topicMap.get(edge.dst);
         if (!src || !dst) return null;
@@ -274,7 +275,7 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesPro
           end: new THREE.Vector3(dst.x, dst.y, dst.z),
           similarity: edge.similarity,
           reversed: false,
-          distance: 0
+          distance: index
         };
       }).filter((line): line is { start: THREE.Vector3; end: THREE.Vector3; similarity: number; reversed: boolean; distance: number } =>
         line !== null
@@ -319,7 +320,10 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesPro
         const darkOpacity = Math.min(0.8, baseOpacity);
         const opacity = isDark ? darkOpacity : 0.8;
         const animationDuration = 0.5;
-        const delay = 1.0 + line.distance * (animationDuration + 0.05);
+
+        const delay = centerNodeId
+          ? 1.0 + line.distance * (animationDuration + 0.05)
+          : 0.5 + (line.distance * 0.01);
 
         return (
           <AnimatedLine
@@ -343,17 +347,64 @@ interface LabelsProps {
   centerNodeId: string | null;
   edges: TopicEdge[];
   animationKey: string;
+  cameraPosition?: THREE.Vector3;
+  showAll?: boolean;
 }
 
-function Labels({ topics, isDark, centerNodeId, edges, animationKey }: LabelsProps) {
+function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosition, showAll }: LabelsProps) {
   const textColor = isDark ? '#ffffff' : '#0284c7';
+  const [cameraDirection, setCameraDirection] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, -1));
+
+  useFrame(({ camera }) => {
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+    setCameraDirection(direction.clone());
+  });
 
   const visibleLabels = useMemo(() => {
+    if (showAll) {
+      return topics;
+    }
+
+    if (cameraPosition) {
+      const topicsWithScore = topics.map(topic => {
+        const toNode = new THREE.Vector3(
+          topic.x - cameraPosition.x,
+          topic.y - cameraPosition.y,
+          topic.z - cameraPosition.z
+        );
+
+        const distanceFromCamera = toNode.length();
+        const forwardDist = toNode.dot(cameraDirection);
+
+        if (forwardDist < 0) {
+          return { topic, score: Infinity };
+        }
+
+        const perpVec = toNode.clone().addScaledVector(cameraDirection, -forwardDist);
+        const perpDist = perpVec.length();
+
+        const viewScore = forwardDist + perpDist * 2;
+
+        return { topic, score: viewScore, distance: distanceFromCamera };
+      });
+
+      topicsWithScore.sort((a, b) => a.score - b.score);
+
+      const maxDistance = 30;
+      const maxLabels = 5;
+
+      return topicsWithScore
+        .filter(item => item.score !== Infinity && item.distance !== undefined && item.distance < maxDistance)
+        .slice(0, maxLabels)
+        .map(item => item.topic);
+    }
+
     return topics.slice(0, Math.min(10, topics.length));
-  }, [topics]);
+  }, [topics, cameraPosition, cameraDirection, showAll]);
 
   const labelDistances = useMemo(() => {
-    if (!centerNodeId) {
+    if (!centerNodeId || edges.length === 0) {
       return new Map<string, number>();
     }
 
@@ -385,14 +436,16 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey }: LabelsPro
     return dist;
   }, [centerNodeId, edges]);
 
+  const useAnimation = centerNodeId !== null && edges.length > 0;
+
   return (
     <group key={animationKey}>
       {visibleLabels.map((topic) => {
         const distance = labelDistances.get(topic.id) ?? 0;
         const animationDuration = 0.5;
-        const delay = 1.0 + distance * (animationDuration + 0.05);
+        const delay = useAnimation ? 1.0 + distance * (animationDuration + 0.05) : 0;
 
-        return (
+        return useAnimation ? (
           <AnimatedLabel
             key={topic.id}
             topic={topic}
@@ -400,9 +453,70 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey }: LabelsPro
             isDark={isDark}
             delay={delay}
           />
+        ) : (
+          <StaticLabel
+            key={topic.id}
+            topic={topic}
+            textColor={textColor}
+            isDark={isDark}
+          />
         );
       })}
     </group>
+  );
+}
+
+interface StaticLabelProps {
+  topic: TopicWithPosition;
+  textColor: string;
+  isDark: boolean;
+}
+
+function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
+  const [opacity, setOpacity] = useState(0);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      const timer = setTimeout(() => setOpacity(1), 50);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [topic.id]);
+
+  return (
+    <Html
+      position={[topic.x, topic.y - 0.6, topic.z]}
+      center
+      sprite
+      transform
+      occlude={false}
+      zIndexRange={[100, 0]}
+      style={{
+        pointerEvents: 'none',
+        userSelect: 'none',
+        opacity,
+        transition: 'opacity 0.5s ease-in-out'
+      }}
+    >
+      <div style={{
+        color: textColor,
+        fontSize: '12px',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+        textShadow: isDark
+          ? '0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)'
+          : '0 0 8px rgba(255,255,255,0.9), 0 0 4px rgba(255,255,255,0.9)'
+      }}>
+        {topic.label}
+      </div>
+    </Html>
   );
 }
 
@@ -466,11 +580,18 @@ function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) 
 interface CameraAnimationProps {
   highlightedTopics: TopicWithPosition[];
   allTopics: TopicWithPosition[];
+  onCameraUpdate?: (position: THREE.Vector3) => void;
 }
 
-function CameraAnimation({ highlightedTopics, allTopics }: CameraAnimationProps) {
+function CameraAnimation({ highlightedTopics, allTopics, onCameraUpdate }: CameraAnimationProps) {
   const controlsRef = useRef<any>(null);
   const previousTargetRef = useRef<string>('');
+
+  useFrame(({ camera }) => {
+    if (onCameraUpdate) {
+      onCameraUpdate(camera.position);
+    }
+  });
 
   const computeBounds = useCallback((topics: TopicWithPosition[]) => {
     if (topics.length === 0) {
@@ -506,7 +627,7 @@ function CameraAnimation({ highlightedTopics, allTopics }: CameraAnimationProps)
 
     const distance = topics.length === 1
       ? 15
-      : span * 2;
+      : span * 1.8;
 
     return { center, distance };
   }, []);
@@ -595,7 +716,9 @@ interface SceneProps extends StarMapProps {
   isDark: boolean;
 }
 
-function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick }: SceneProps) {
+function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAllLabels }: SceneProps) {
+  const [cameraPosition, setCameraPosition] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, 30));
+
   const highlightedIds = useMemo(() => {
     if (!highlightedTopics) return new Set<string>();
     return new Set(highlightedTopics.map(r => r.topic.id));
@@ -657,8 +780,11 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick }: Scene
   }, [highlightedTopics]);
 
   const edgeAnimationKey = useMemo(() => {
-    return highlightedList.map(t => t.id).sort().join(',');
-  }, [highlightedList]);
+    if (highlightedList.length > 0) {
+      return highlightedList.map(t => t.id).sort().join(',');
+    }
+    return edges ? `all-edges-${edges.length}` : 'no-edges';
+  }, [highlightedList, edges]);
 
   return (
     <>
@@ -687,6 +813,18 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick }: Scene
         />
       )}
 
+      {highlightedList.length === 0 && (
+        <Labels
+          topics={topics}
+          isDark={isDark}
+          centerNodeId={null}
+          edges={[]}
+          animationKey="proximity"
+          cameraPosition={cameraPosition}
+          showAll={showAllLabels}
+        />
+      )}
+
       {/* Normal stars */}
       <Stars
         topics={normalList}
@@ -695,6 +833,8 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick }: Scene
         isDark={isDark}
         materialKey={materialKey + '-normal'}
         opacity={normalOpacity}
+        clickable={true}
+        onTopicClick={onTopicClick}
       />
 
       {/* Highlighted stars */}
@@ -715,12 +855,16 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick }: Scene
         <Edges edges={edges} topicMap={topicMap} centerNodeId={centerNodeId} isDark={isDark} animationKey={edgeAnimationKey} />
       )}
 
-      <CameraAnimation highlightedTopics={highlightedList} allTopics={topics} />
+      <CameraAnimation
+        highlightedTopics={highlightedList}
+        allTopics={topics}
+        onCameraUpdate={setCameraPosition}
+      />
     </>
   );
 }
 
-export function StarMap({ topics, highlightedTopics, edges, onTopicClick }: StarMapProps) {
+export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAllLabels }: StarMapProps) {
   const [bloomReady, setBloomReady] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const { resolvedTheme } = useTheme();
@@ -785,6 +929,7 @@ export function StarMap({ topics, highlightedTopics, edges, onTopicClick }: Star
         edges={edges}
         isDark={isDark}
         onTopicClick={onTopicClick}
+        showAllLabels={showAllLabels}
       />
       {bloomReady && (
         <EffectComposer>
