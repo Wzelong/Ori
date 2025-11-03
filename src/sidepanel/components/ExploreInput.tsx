@@ -45,13 +45,13 @@ export function ExploreInput({ onSearch, onInputChange, isSearching = false, has
   const handleSendMessage = async () => {
     if (!input.trim() || isSearching) return
     const query = input.trim()
-    await onSearch(query)
     setInput('')
     setIsExpanded(false)
     if (textareaRef.current) {
       textareaRef.current.style.height = '0px'
       resize(textareaRef.current)
     }
+    await onSearch(query)
   }
 
   return (
@@ -60,7 +60,7 @@ export function ExploreInput({ onSearch, onInputChange, isSearching = false, has
         isFocused ? 'border-foreground/60' : 'border-foreground/20'
       } ${
         isExpanded ? 'rounded-2xl' : 'rounded-full'
-      } p-3 flex items-center gap-1 bg-background/70 backdrop-blur-md`}
+      } p-3 flex items-center gap-1 bg-background/20 backdrop-blur-md`}
       style={{
         transition: 'border-radius ease-in-out, border-color 0.2s ease-in-out'
       }}

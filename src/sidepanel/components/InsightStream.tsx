@@ -77,23 +77,40 @@ export function InsightStream({ stream, isWaiting, itemMap, onClose, onComplete 
         parts.push(text.substring(lastIndex, match.index))
       }
 
-      const title = match[1]
-      const link = itemMap.get(title)
+      const content = match[1]
+      const link = itemMap.get(content)
 
       if (link) {
-        parts.push(
-          <a
-            key={match.index}
-            href={link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-foreground underline hover:text-foreground/60 cursor-pointer transition-colors"
-          >
-            {title}
-          </a>
-        )
+        const isPageId = /^p\d+$/.test(content)
+
+        if (isPageId) {
+          const citationNumber = content.substring(1)
+          parts.push(
+            <a
+              key={match.index}
+              href={link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground/80 hover:text-foreground transition-colors cursor-pointer no-underline"
+            >
+              <sup>[{citationNumber}]</sup>
+            </a>
+          )
+        } else {
+          parts.push(
+            <a
+              key={match.index}
+              href={link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline hover:text-foreground/60 cursor-pointer transition-colors"
+            >
+              {content}
+            </a>
+          )
+        }
       } else {
-        parts.push(`**${title}**`)
+        parts.push(`**${content}**`)
       }
 
       lastIndex = regex.lastIndex

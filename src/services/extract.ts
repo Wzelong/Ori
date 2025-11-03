@@ -153,9 +153,9 @@ Return clean, valid JSON only.
   const metadata = JSON.parse(metadataJson);
 
   // 5. Create embeddings
-  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(metadata.topics);
+  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(metadata.topics, 'doc');
   const topicEmbeddings = topicEmbeddingsTensor.tolist() as number[][];
-  const contentEmbedding = await getEmbeddingFromOffscreen(`Title: ${metadata.title}\n\n${summary}`);
+  const contentEmbedding = await getEmbeddingFromOffscreen(summary, 'doc', metadata.title);
 
   return {
     title: metadata.title,
@@ -222,9 +222,9 @@ Return clean, valid JSON only.
   const metadata = JSON.parse(metadataJson);
 
   // 5. Create embeddings
-  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(metadata.topics);
+  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(metadata.topics, 'doc');
   const topicEmbeddings = topicEmbeddingsTensor.tolist() as number[][];
-  const contentEmbedding = await getEmbeddingFromOffscreen(`Title: ${metadata.title}\n\n${summary}`);
+  const contentEmbedding = await getEmbeddingFromOffscreen(summary, 'doc', metadata.title);
 
   return {
     title: metadata.title,

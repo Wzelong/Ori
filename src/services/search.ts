@@ -36,7 +36,7 @@ export interface ItemSearchResult {
 export async function findSimilarTopics(
   queryEmbedding: number[],
   topK: number = 5,
-  threshold: number = 0.5
+  threshold: number = 0.82
 ): Promise<TopicSearchResult[]> {
   const topics = await db.topics.toArray();
 
@@ -68,7 +68,7 @@ export async function findSimilarTopics(
 export async function findSimilarItems(
   queryEmbedding: number[],
   topK: number = 10,
-  threshold: number = 0.5
+  threshold: number = 0.82
 ): Promise<ItemSearchResult[]> {
   const items = await db.items.toArray();
 
@@ -91,33 +91,4 @@ export async function findSimilarItems(
   results.sort((a, b) => b.similarity - a.similarity);
 
   return results.slice(0, topK);
-}
-
-export interface CombinedSearchResult {
-  topics: TopicSearchResult[];
-  items: ItemSearchResult[];
-}
-
-export async function searchAll(
-  queryEmbedding: number[],
-  options: {
-    topicK?: number;
-    itemK?: number;
-    topicThreshold?: number;
-    itemThreshold?: number;
-  } = {}
-): Promise<CombinedSearchResult> {
-  const {
-    topicK = 5,
-    itemK = 10,
-    topicThreshold = 0.5,
-    itemThreshold = 0.5
-  } = options;
-
-  const [topics, items] = await Promise.all([
-    findSimilarTopics(queryEmbedding, topicK, topicThreshold),
-    findSimilarItems(queryEmbedding, itemK, itemThreshold)
-  ]);
-
-  return { topics, items };
 }

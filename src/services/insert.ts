@@ -5,8 +5,8 @@ import type { PageResult, Topic, Item, TopicEdge } from '../types/schema';
 import { Tensor } from '@huggingface/transformers';
 import { recomputeAllTopicPositions } from './positions';
 
-const TOPIC_MERGE_THRESHOLD = 0.92;
-const EDGE_MIN_SIMILARITY = 0.86;
+const TOPIC_MERGE_THRESHOLD = 0.85;
+const EDGE_MIN_SIMILARITY = 0.6;
 const MAX_EDGES_PER_NODE = 5;
 
 type EdgeData = Omit<TopicEdge, 'id' | 'createdAt'>;

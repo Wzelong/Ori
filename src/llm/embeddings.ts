@@ -17,20 +17,38 @@ async function ensureModel() {
   }
 }
 
-export async function getEmbedding(text: string): Promise<number[]> {
+export async function getEmbedding(
+  text: string,
+  format: 'query' | 'doc' = 'query',
+  title?: string
+): Promise<number[]> {
   await ensureModel();
 
-  const prefix = 'task: clustering | query: ';
+  let prefix: string;
+  if (format === 'query') {
+    prefix = 'task: search result | query: ';
+  } else if (title) {
+    prefix = `title: ${title} | text: `;
+  } else {
+    prefix = 'title: none | text: ';
+  }
+
   const inputs = await tokenizer(prefix + text, { padding: true });
 
   const { sentence_embedding } = await model(inputs);
   return sentence_embedding.tolist()[0];
 }
 
-export async function getEmbeddings(texts: string[]): Promise<Tensor> {
+export async function getEmbeddings(
+  texts: string[],
+  format: 'query' | 'doc' = 'doc'
+): Promise<Tensor> {
   await ensureModel();
 
-  const prefix = 'task: clustering | query: ';
+  const prefix = format === 'query'
+    ? 'task: search result | query: '
+    : 'title: none | text: ';
+
   const prefixedTexts = texts.map(text => prefix + text);
   const inputs = await tokenizer(prefixedTexts, { padding: true });
 

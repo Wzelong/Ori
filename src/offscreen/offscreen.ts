@@ -4,7 +4,7 @@ import { Tensor } from '@huggingface/transformers'
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'GET_EMBEDDING') {
-    getEmbedding(message.text)
+    getEmbedding(message.text, message.format, message.title)
       .then((embedding) => {
         sendResponse({ success: true, embedding })
       })
@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'GET_EMBEDDINGS') {
-    getEmbeddings(message.texts)
+    getEmbeddings(message.texts, message.format)
       .then((embeddings) => {
         sendResponse({ success: true, embeddings: embeddings.tolist() })
       })
@@ -28,7 +28,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'WARMUP_MODEL') {
-    getEmbedding('warmup')
+    getEmbedding('warmup', 'query')
       .then(() => {
         sendResponse({ success: true })
       })

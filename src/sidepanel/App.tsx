@@ -12,11 +12,9 @@ import { InsightStream } from './components/InsightStream'
 import { StarMap } from '@/components/StarMap'
 import { db } from '@/db/database'
 import type { TopicWithPosition, TopicEdge, Item } from '@/types/schema'
-import { findSimilarTopics, findSimilarItems, type TopicSearchResult } from '@/services/search'
+import type { TopicSearchResult } from '@/services/search'
 import { getItemsForTopic } from '@/services/graph'
-import { generateInsight } from '@/services/rag'
-
-const MAX_EDGES = 20
+import { performRAGSearch } from '@/services/searchOrchestrator'
 
 export default function App() {
   const extraction = useExtraction()
@@ -63,38 +61,20 @@ export default function App() {
 
       const response = await chrome.runtime.sendMessage({
         type: 'GET_EMBEDDING',
-        text: query
+        text: query,
+        format: 'query'
       })
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to get embedding')
+      if (!response || !response.success) {
+        throw new Error(response?.error || 'Failed to get embedding')
       }
 
+      const result = await performRAGSearch(response.embedding, query, topics)
 
-      const [topicResults, itemResults] = await Promise.all([
-        findSimilarTopics(response.embedding, 5, 0.8),
-        findSimilarItems(response.embedding, 10, 0.8)
-      ])
-
-      setHighlightedTopics(topicResults)
-
-      if (topicResults.length > 0) {
-        const topicIds = new Set(topicResults.map(r => r.topic.id))
-
-        const allEdges = await db.topic_edges.toArray()
-        const relevantEdges = allEdges
-          .filter(edge => topicIds.has(edge.src) && topicIds.has(edge.dst))
-          .sort((a, b) => b.similarity - a.similarity)
-          .slice(0, MAX_EDGES)
-
-        setEdges(relevantEdges)
-      } else {
-        setEdges(undefined)
-      }
-
-      const { stream, itemMap } = await generateInsight(query, itemResults)
-      setInsightStream(stream)
-      setInsightItemMap(itemMap)
+      setHighlightedTopics(result.highlightedTopics)
+      setEdges(result.edges)
+      setInsightStream(result.insightStream)
+      setInsightItemMap(result.itemMap)
     } catch (error) {
       console.error('[explore] Search error:', error)
     }

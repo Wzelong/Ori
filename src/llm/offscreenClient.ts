@@ -1,9 +1,15 @@
 import { Tensor } from '@huggingface/transformers'
 
-export async function getEmbeddingFromOffscreen(text: string): Promise<number[]> {
+export async function getEmbeddingFromOffscreen(
+  text: string,
+  format: 'query' | 'doc' = 'query',
+  title?: string
+): Promise<number[]> {
   const response = await chrome.runtime.sendMessage({
     type: 'GET_EMBEDDING',
     text,
+    format,
+    title,
   })
 
   if (!response.success) {
@@ -13,10 +19,14 @@ export async function getEmbeddingFromOffscreen(text: string): Promise<number[]>
   return response.embedding
 }
 
-export async function getEmbeddingsFromOffscreen(texts: string[]): Promise<Tensor> {
+export async function getEmbeddingsFromOffscreen(
+  texts: string[],
+  format: 'query' | 'doc' = 'doc'
+): Promise<Tensor> {
   const response = await chrome.runtime.sendMessage({
     type: 'GET_EMBEDDINGS',
     texts,
+    format,
   })
 
   if (!response.success) {
