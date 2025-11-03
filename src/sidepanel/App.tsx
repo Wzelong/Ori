@@ -29,6 +29,8 @@ export default function App() {
   const [isWaitingForInsight, setIsWaitingForInsight] = useState(false)
   const [showingAllEdges, setShowingAllEdges] = useState(false)
   const [showingAllLabels, setShowingAllLabels] = useState(false)
+  const [showingClusters, setShowingClusters] = useState(false)
+  const [clusterCount, setClusterCount] = useState(0)
 
   useEffect(() => {
     const loadTopics = async () => {
@@ -89,6 +91,12 @@ export default function App() {
       setEdges(result.edges)
       setInsightStream(result.insightStream)
       setInsightItemMap(result.itemMap)
+
+      // Disable all modes when we have highlighted nodes
+      if (result.highlightedTopics && result.highlightedTopics.length > 0) {
+        setShowingAllEdges(false)
+        setShowingClusters(false)
+      }
     } catch (error) {
       console.error('[explore] Search error:', error)
     }
@@ -122,6 +130,9 @@ export default function App() {
   }
 
   const handleToggleEdges = async () => {
+    // Don't allow toggling if highlights are active
+    if (highlightedTopics && highlightedTopics.length > 0) return
+
     if (showingAllEdges) {
       setEdges(undefined)
       setHighlightedTopics(undefined)
@@ -130,11 +141,26 @@ export default function App() {
       const allEdges = await db.topic_edges.toArray()
       setEdges(allEdges)
       setShowingAllEdges(true)
+      setShowingClusters(false)
     }
   }
 
   const handleToggleLabels = () => {
     setShowingAllLabels(!showingAllLabels)
+  }
+
+  const handleToggleClusters = () => {
+    // Don't allow toggling if highlights are active
+    if (highlightedTopics && highlightedTopics.length > 0) return
+
+    if (showingClusters) {
+      setShowingClusters(false)
+    } else {
+      setShowingClusters(true)
+      setShowingAllEdges(false)
+      setEdges(undefined)
+      setHighlightedTopics(undefined)
+    }
   }
 
   return (
@@ -154,6 +180,9 @@ export default function App() {
         showingEdges={showingAllEdges}
         onTopicClick={handleToggleLabels}
         showingAllLabels={showingAllLabels}
+        onClusterClick={handleToggleClusters}
+        showingClusters={showingClusters}
+        clusterCount={clusterCount}
       />
 
       <div className="flex-1 overflow-hidden relative">
@@ -166,6 +195,8 @@ export default function App() {
                 edges={edges}
                 onTopicClick={handleTopicClick}
                 showAllLabels={showingAllLabels}
+                showClusters={showingClusters}
+                onClusterCountChange={setClusterCount}
               />
             </div>
             {(isWaitingForInsight || insightStream) && (

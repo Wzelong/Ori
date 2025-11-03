@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { BookMarked, Sparkle, Waypoints } from 'lucide-react'
+import { BookMarked, Sparkle, Waypoints, Network } from 'lucide-react'
 import { db } from '@/db/database'
 import type { StatusState } from '@/hooks/useExtraction'
 
@@ -11,9 +11,12 @@ interface StatsBarProps {
   showingEdges?: boolean
   onTopicClick?: () => void
   showingAllLabels?: boolean
+  onClusterClick?: () => void
+  showingClusters?: boolean
+  clusterCount?: number
 }
 
-export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, showingAllLabels }: StatsBarProps) {
+export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, showingAllLabels, onClusterClick, showingClusters, clusterCount = 0 }: StatsBarProps) {
   const [stats, setStats] = useState({ topicCount: 0, itemCount: 0, edgeCount: 0 })
 
   useEffect(() => {
@@ -117,6 +120,26 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
               </TooltipTrigger>
               <TooltipContent>
                 <p>{showingEdges ? 'Hide edges' : 'Show all edges'}</p>
+              </TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge
+                  variant={showingClusters ? "default" : "outline"}
+                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all ${
+                    showingClusters
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-accent hover:text-accent-foreground'
+                  }`}
+                  onClick={onClusterClick}
+                >
+                  <Network className="h-3 w-3" />
+                  {clusterCount}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{showingClusters ? 'Hide clusters' : 'Show clusters'}</p>
               </TooltipContent>
             </Tooltip>
           </div>

@@ -121,7 +121,10 @@ Related_Topics (array; may be empty):
 ${JSON.stringify(topicLabels)}
 
 Related_Pages (array; may be empty):
-${JSON.stringify(itemsJson, null, 2)}`
+${JSON.stringify(itemsJson, null, 2)}
+
+Reply concise. MAX 3 sentences.
+`
 
   const systemPrompt = `You are Ori — a calm, succinct research guide living inside a graph UI.
 Your job: respond ONLY using the provided Related_Topics and Related_Pages.
@@ -169,9 +172,7 @@ OUTPUT RULES:
    - No bullet lists.
    - Keep total length tight.
 
-5) Safety/grounding:
-   - Use ONLY the "summary" fields from Related_Pages for factual claims.
-   - If evidence is thin or conflicting, say so briefly and prefer suggesting actions.`
+**Important**: your response should have MAX 3 sentences.`
 
   const stream = await generateTextStreaming(userPrompt, { systemPrompt })
 

@@ -8,6 +8,9 @@ import { useTheme } from 'next-themes';
 
 import type { TopicSearchResult } from '@/services/search';
 import type { TopicWithPosition, TopicEdge } from '@/types/schema';
+import { identifyClusters, getOrbitDataForTopic, computeClustersWithEdges } from '@/services/clustering';
+import type { ClusterInfo, ClusterWithEdges } from '@/services/clustering';
+import { db } from '@/db/database';
 
 interface StarMapProps {
   topics: TopicWithPosition[];
@@ -15,6 +18,8 @@ interface StarMapProps {
   edges?: TopicEdge[];
   onTopicClick?: (topic: TopicWithPosition) => void;
   showAllLabels?: boolean;
+  showClusters?: boolean;
+  onClusterCountChange?: (count: number) => void;
 }
 
 interface StarsProps {
@@ -22,21 +27,25 @@ interface StarsProps {
   colorFn: (topic: TopicWithPosition) => THREE.Color | number | string;
   scaleFn: (topic: TopicWithPosition) => number;
   isDark: boolean;
-  /** Recreate material when this key changes (e.g., theme flip) */
   materialKey: string;
-  /** Optional global opacity for this mesh (applies to all its instances) */
   opacity?: number;
-  /** Make stars clickable */
   clickable?: boolean;
-  /** Click handler */
   onTopicClick?: (topic: TopicWithPosition) => void;
+  clusters?: ClusterInfo[];
+  enableOrbits?: boolean;
+  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
 }
 
-function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, clickable = false, onTopicClick }: StarsProps) {
+function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, clickable = false, onTopicClick, clusters, enableOrbits = false, orbitalPositionsRef }: StarsProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const count = topics.length;
   const [hovered, setHovered] = useState(false);
   const pointerDownTimeRef = useRef<number>(0);
+  const basePositionsRef = useRef<Float32Array>(new Float32Array(count * 3));
+  const currentPositionsRef = useRef<Float32Array>(new Float32Array(count * 3));
+  const initializedRef = useRef(false);
+  const orbitStartTimeRef = useRef<number>(0);
+  const orbitAngleOffsetsRef = useRef<Float32Array>(new Float32Array(count));
 
   useEffect(() => {
     if (clickable) {
@@ -75,10 +84,24 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
     }
 
     return { positions, scales, colors };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topics, colorFn, scaleFn, isDark, count]);
+  }, [topics, colorFn, scaleFn, count]);
 
-  // Write matrices + colors once (or when deps change)
+  useEffect(() => {
+    for (let i = 0; i < count; i++) {
+      basePositionsRef.current[i * 3 + 0] = positions[i * 3 + 0];
+      basePositionsRef.current[i * 3 + 1] = positions[i * 3 + 1];
+      basePositionsRef.current[i * 3 + 2] = positions[i * 3 + 2];
+
+      // Only initialize current positions once, don't overwrite them
+      if (!initializedRef.current) {
+        currentPositionsRef.current[i * 3 + 0] = positions[i * 3 + 0];
+        currentPositionsRef.current[i * 3 + 1] = positions[i * 3 + 1];
+        currentPositionsRef.current[i * 3 + 2] = positions[i * 3 + 2];
+      }
+    }
+    initializedRef.current = true;
+  }, [positions, count]);
+
   useEffect(() => {
     if (!meshRef.current) return;
 
@@ -105,11 +128,124 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
       meshRef.current.instanceColor.needsUpdate = true;
     }
 
-    // Nudge material/program cache when theme switches
     if (meshRef.current.material) {
       (meshRef.current.material as THREE.Material).needsUpdate = true;
     }
   }, [positions, scales, colors, count, tempObj, tempColor, isDark]);
+
+  useFrame(({ clock }) => {
+    if (!meshRef.current) return;
+
+    if (enableOrbits && clusters && clusters.length > 0) {
+      const justEnabled = orbitStartTimeRef.current === 0;
+      if (justEnabled) {
+        orbitStartTimeRef.current = clock.getElapsedTime();
+      }
+
+      const elapsed = clock.getElapsedTime() - orbitStartTimeRef.current;
+
+      for (let i = 0; i < count; i++) {
+        const topic = topics[i];
+        const orbitData = getOrbitDataForTopic(topic.id, clusters);
+
+        if (orbitData && !orbitData.isCentroid) {
+          const [cx, cy, cz] = orbitData.centroid;
+          const bx = basePositionsRef.current[i * 3 + 0];
+          const by = basePositionsRef.current[i * 3 + 1];
+          const bz = basePositionsRef.current[i * 3 + 2];
+
+          const dx = bx - cx;
+          const dy = by - cy;
+          const dz = bz - cz;
+          const radius = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+          if (radius >= 0.01) {
+            const radialVec = new THREE.Vector3(dx, dy, dz).normalize();
+            const up = new THREE.Vector3(0, 1, 0);
+            const axis = new THREE.Vector3().crossVectors(radialVec, up).normalize();
+
+            if (axis.length() < 0.01) {
+              axis.set(1, 0, 0);
+            }
+
+            // Calculate angle offset from current position when first enabled
+            if (justEnabled) {
+              const currentVec = new THREE.Vector3(
+                currentPositionsRef.current[i * 3 + 0] - cx,
+                currentPositionsRef.current[i * 3 + 1] - cy,
+                currentPositionsRef.current[i * 3 + 2] - cz
+              );
+              const baseVec = new THREE.Vector3(dx, dy, dz);
+
+              orbitAngleOffsetsRef.current[i] = Math.atan2(
+                new THREE.Vector3().crossVectors(baseVec, currentVec).dot(axis),
+                baseVec.dot(currentVec)
+              );
+            }
+
+            const speed = 0.2 + (i % 10) * 0.02;
+            const angle = orbitAngleOffsetsRef.current[i] + elapsed * speed;
+
+            const rotated = new THREE.Vector3(dx, dy, dz);
+            rotated.applyAxisAngle(axis, angle);
+
+            tempObj.position.set(
+              cx + rotated.x,
+              cy + rotated.y,
+              cz + rotated.z
+            );
+
+            currentPositionsRef.current[i * 3 + 0] = tempObj.position.x;
+            currentPositionsRef.current[i * 3 + 1] = tempObj.position.y;
+            currentPositionsRef.current[i * 3 + 2] = tempObj.position.z;
+          } else {
+            tempObj.position.set(bx, by, bz);
+            currentPositionsRef.current[i * 3 + 0] = bx;
+            currentPositionsRef.current[i * 3 + 1] = by;
+            currentPositionsRef.current[i * 3 + 2] = bz;
+          }
+        } else {
+          const bx = basePositionsRef.current[i * 3 + 0];
+          const by = basePositionsRef.current[i * 3 + 1];
+          const bz = basePositionsRef.current[i * 3 + 2];
+          tempObj.position.set(bx, by, bz);
+          currentPositionsRef.current[i * 3 + 0] = bx;
+          currentPositionsRef.current[i * 3 + 1] = by;
+          currentPositionsRef.current[i * 3 + 2] = bz;
+        }
+
+        if (orbitalPositionsRef?.current) {
+          orbitalPositionsRef.current.set(topic.id, tempObj.position.clone());
+        }
+
+        tempObj.scale.setScalar(scales[i]);
+        tempObj.updateMatrix();
+        meshRef.current.setMatrixAt(i, tempObj.matrix);
+      }
+    } else {
+      orbitStartTimeRef.current = 0;
+
+      for (let i = 0; i < count; i++) {
+        const topic = topics[i];
+
+        tempObj.position.set(
+          currentPositionsRef.current[i * 3 + 0],
+          currentPositionsRef.current[i * 3 + 1],
+          currentPositionsRef.current[i * 3 + 2]
+        );
+
+        if (orbitalPositionsRef?.current) {
+          orbitalPositionsRef.current.set(topic.id, tempObj.position.clone());
+        }
+
+        tempObj.scale.setScalar(scales[i]);
+        tempObj.updateMatrix();
+        meshRef.current.setMatrixAt(i, tempObj.matrix);
+      }
+    }
+
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  });
 
   const handlePointerDown = () => {
     if (clickable) {
@@ -171,26 +307,40 @@ interface EdgesProps {
   centerNodeId: string | null;
   isDark: boolean;
   animationKey: string;
+  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
+  clustersWithEdges?: ClusterWithEdges[];
 }
 
 interface AnimatedLineProps {
   start: THREE.Vector3;
   end: THREE.Vector3;
+  srcId: string;
+  dstId: string;
   color: string;
   opacity: number;
   delay: number;
   reversed: boolean;
+  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
 }
 
-function AnimatedLine({ start, end, color, opacity, delay, reversed }: AnimatedLineProps) {
+function AnimatedLine({ start, end, srcId, dstId, color, opacity, delay, reversed, orbitalPositionsRef }: AnimatedLineProps) {
   const [progress, setProgress] = useState(0);
   const startTimeRef = useRef<number | null>(null);
   const point1 = useRef(new THREE.Vector3());
   const point2 = useRef(new THREE.Vector3());
   const tempVec = useRef(new THREE.Vector3());
   const [, forceUpdate] = useState(0);
+  const currentStart = useRef(start.clone());
+  const currentEnd = useRef(end.clone());
 
   useFrame(({ clock }) => {
+    if (orbitalPositionsRef?.current) {
+      const srcPos = orbitalPositionsRef.current.get(srcId);
+      const dstPos = orbitalPositionsRef.current.get(dstId);
+      if (srcPos) currentStart.current.copy(srcPos);
+      if (dstPos) currentEnd.current.copy(dstPos);
+    }
+
     if (startTimeRef.current === null) {
       startTimeRef.current = clock.getElapsedTime();
     }
@@ -202,12 +352,12 @@ function AnimatedLine({ start, end, color, opacity, delay, reversed }: AnimatedL
     const newProgress = Math.min(1, elapsed / animationDuration);
 
     if (reversed) {
-      tempVec.current.lerpVectors(end, start, newProgress);
+      tempVec.current.lerpVectors(currentEnd.current, currentStart.current, newProgress);
       point1.current.copy(tempVec.current);
-      point2.current.copy(end);
+      point2.current.copy(currentEnd.current);
     } else {
-      tempVec.current.lerpVectors(start, end, newProgress);
-      point1.current.copy(start);
+      tempVec.current.lerpVectors(currentStart.current, currentEnd.current, newProgress);
+      point1.current.copy(currentStart.current);
       point2.current.copy(tempVec.current);
     }
 
@@ -228,7 +378,7 @@ function AnimatedLine({ start, end, color, opacity, delay, reversed }: AnimatedL
   );
 }
 
-function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesProps) {
+function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, orbitalPositionsRef, clustersWithEdges }: EdgesProps) {
   const adjacency = useMemo(() => {
     const adj = new Map<string, Set<string>>();
     edges.forEach(edge => {
@@ -273,11 +423,13 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesPro
         return {
           start: new THREE.Vector3(src.x, src.y, src.z),
           end: new THREE.Vector3(dst.x, dst.y, dst.z),
+          srcId: edge.src,
+          dstId: edge.dst,
           similarity: edge.similarity,
           reversed: false,
           distance: index
         };
-      }).filter((line): line is { start: THREE.Vector3; end: THREE.Vector3; similarity: number; reversed: boolean; distance: number } =>
+      }).filter((line): line is { start: THREE.Vector3; end: THREE.Vector3; srcId: string; dstId: string; similarity: number; reversed: boolean; distance: number } =>
         line !== null
       );
     }
@@ -297,13 +449,15 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesPro
         return {
           start: new THREE.Vector3(src.x, src.y, src.z),
           end: new THREE.Vector3(dst.x, dst.y, dst.z),
+          srcId: edge.src,
+          dstId: edge.dst,
           similarity: edge.similarity,
           reversed,
           distance
         };
       })
       .filter(
-        (line): line is { start: THREE.Vector3; end: THREE.Vector3; similarity: number; reversed: boolean; distance: number } =>
+        (line): line is { start: THREE.Vector3; end: THREE.Vector3; srcId: string; dstId: string; similarity: number; reversed: boolean; distance: number } =>
           line !== null
       )
       .sort((a, b) => a.distance - b.distance);
@@ -311,11 +465,25 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesPro
 
   if (lines.length === 0) return null;
 
-  const edgeColor = isDark ? '#ffffff' : '#0284c7';
+  const defaultEdgeColor = isDark ? '#ffffff' : '#0284c7';
+
+  const getEdgeColor = (srcId: string, dstId: string): string => {
+    if (!clustersWithEdges) return defaultEdgeColor;
+
+    const cluster = clustersWithEdges.find((c: ClusterWithEdges) =>
+      c.edges.some((e: TopicEdge) =>
+        (e.src === srcId && e.dst === dstId) ||
+        (e.src === dstId && e.dst === srcId)
+      )
+    );
+    return cluster?.color || defaultEdgeColor;
+  };
 
   return (
     <group key={animationKey}>
       {lines.map((line, i) => {
+        const edgeColor = getEdgeColor(line.srcId, line.dstId);
+
         const baseOpacity = Math.max(0.2, (line.similarity - 0.82) * 5);
         const darkOpacity = Math.min(0.8, baseOpacity);
         const opacity = isDark ? darkOpacity : 0.8;
@@ -330,10 +498,13 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey }: EdgesPro
             key={i}
             start={line.start}
             end={line.end}
+            srcId={line.srcId}
+            dstId={line.dstId}
             color={edgeColor}
             opacity={opacity}
             delay={delay}
             reversed={line.reversed}
+            orbitalPositionsRef={orbitalPositionsRef}
           />
         );
       })}
@@ -349,11 +520,19 @@ interface LabelsProps {
   animationKey: string;
   cameraPosition?: THREE.Vector3;
   showAll?: boolean;
+  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
+  clusterCentroids?: string[];
+  topicColorMap?: Map<string, string>;
 }
 
-function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosition, showAll }: LabelsProps) {
-  const textColor = isDark ? '#ffffff' : '#0284c7';
+function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosition, showAll, orbitalPositionsRef, clusterCentroids, topicColorMap }: LabelsProps) {
+  const defaultTextColor = isDark ? '#ffffff' : '#0284c7';
   const [cameraDirection, setCameraDirection] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, -1));
+
+  const getTextColor = useCallback((topicId: string): string => {
+    if (isDark || !topicColorMap) return defaultTextColor;
+    return topicColorMap.get(topicId) || defaultTextColor;
+  }, [isDark, topicColorMap, defaultTextColor]);
 
   useFrame(({ camera }) => {
     const direction = new THREE.Vector3();
@@ -362,12 +541,21 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
   });
 
   const visibleLabels = useMemo(() => {
+    // Always include cluster centroids
+    const centroidSet = new Set(clusterCentroids || []);
+    const centroids = topics.filter(t => centroidSet.has(t.id));
+
     if (showAll) {
       return topics;
     }
 
     if (cameraPosition) {
       const topicsWithScore = topics.map(topic => {
+        // Centroids always get priority score
+        if (centroidSet.has(topic.id)) {
+          return { topic, score: -1, distance: 0 };
+        }
+
         const toNode = new THREE.Vector3(
           topic.x - cameraPosition.x,
           topic.y - cameraPosition.y,
@@ -392,16 +580,18 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
       topicsWithScore.sort((a, b) => a.score - b.score);
 
       const maxDistance = 30;
-      const maxLabels = 5;
+      const maxLabels = 5 + centroids.length;
 
       return topicsWithScore
-        .filter(item => item.score !== Infinity && item.distance !== undefined && item.distance < maxDistance)
+        .filter(item => item.score !== Infinity && (centroidSet.has(item.topic.id) || (item.distance !== undefined && item.distance < maxDistance)))
         .slice(0, maxLabels)
         .map(item => item.topic);
     }
 
-    return topics.slice(0, Math.min(10, topics.length));
-  }, [topics, cameraPosition, cameraDirection, showAll]);
+    // If no camera position, show centroids + first few topics
+    const nonCentroids = topics.filter(t => !centroidSet.has(t.id));
+    return [...centroids, ...nonCentroids.slice(0, Math.min(10, nonCentroids.length))];
+  }, [topics, cameraPosition, cameraDirection, showAll, clusterCentroids]);
 
   const labelDistances = useMemo(() => {
     if (!centerNodeId || edges.length === 0) {
@@ -444,6 +634,7 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
         const distance = labelDistances.get(topic.id) ?? 0;
         const animationDuration = 0.5;
         const delay = useAnimation ? 1.0 + distance * (animationDuration + 0.05) : 0;
+        const textColor = getTextColor(topic.id);
 
         return useAnimation ? (
           <AnimatedLabel
@@ -452,6 +643,7 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
             textColor={textColor}
             isDark={isDark}
             delay={delay}
+            orbitalPositionsRef={orbitalPositionsRef}
           />
         ) : (
           <StaticLabel
@@ -459,6 +651,7 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
             topic={topic}
             textColor={textColor}
             isDark={isDark}
+            orbitalPositionsRef={orbitalPositionsRef}
           />
         );
       })}
@@ -470,11 +663,22 @@ interface StaticLabelProps {
   topic: TopicWithPosition;
   textColor: string;
   isDark: boolean;
+  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
 }
 
-function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
+function StaticLabel({ topic, textColor, isDark, orbitalPositionsRef }: StaticLabelProps) {
   const [opacity, setOpacity] = useState(0);
   const mountedRef = useRef(false);
+  const [position, setPosition] = useState<[number, number, number]>([topic.x, topic.y - 0.6, topic.z]);
+
+  useFrame(() => {
+    if (orbitalPositionsRef?.current) {
+      const orbitalPos = orbitalPositionsRef.current.get(topic.id);
+      if (orbitalPos) {
+        setPosition([orbitalPos.x, orbitalPos.y - 0.6, orbitalPos.z]);
+      }
+    }
+  });
 
   useEffect(() => {
     if (!mountedRef.current) {
@@ -492,7 +696,7 @@ function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
 
   return (
     <Html
-      position={[topic.x, topic.y - 0.6, topic.z]}
+      position={position}
       center
       sprite
       transform
@@ -525,11 +729,13 @@ interface AnimatedLabelProps {
   textColor: string;
   isDark: boolean;
   delay: number;
+  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
 }
 
-function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) {
+function AnimatedLabel({ topic, textColor, isDark, delay, orbitalPositionsRef }: AnimatedLabelProps) {
   const [opacity, setOpacity] = useState(0);
   const startTimeRef = useRef<number | null>(null);
+  const [position, setPosition] = useState<[number, number, number]>([topic.x, topic.y - 0.6, topic.z]);
 
   useFrame(({ clock }) => {
     if (startTimeRef.current === null) {
@@ -546,11 +752,18 @@ function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) 
     } else {
       setOpacity(1);
     }
+
+    if (orbitalPositionsRef?.current) {
+      const orbitalPos = orbitalPositionsRef.current.get(topic.id);
+      if (orbitalPos) {
+        setPosition([orbitalPos.x, orbitalPos.y - 0.6, orbitalPos.z]);
+      }
+    }
   });
 
   return (
     <Html
-      position={[topic.x, topic.y - 0.6, topic.z]}
+      position={position}
       center
       sprite
       transform
@@ -665,7 +878,7 @@ function CameraAnimation({ highlightedTopics, allTopics, onCameraUpdate }: Camer
       distance: 0,
       lookAt: clusterCenter
     };
-  }, [highlightedTopics, allTopics]);
+  }, [highlightedTopics, allTopics, computeBounds]);
 
   useEffect(() => {
     if (!controlsRef.current) return;
@@ -716,8 +929,38 @@ interface SceneProps extends StarMapProps {
   isDark: boolean;
 }
 
-function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAllLabels }: SceneProps) {
+interface SceneInternalProps extends SceneProps {
+  clusters: ClusterInfo[];
+  allEdgesForMST: TopicEdge[];
+}
+
+function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAllLabels, showClusters, clusters, allEdgesForMST }: SceneInternalProps) {
   const [cameraPosition, setCameraPosition] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, 30));
+  const orbitalPositionsRef = useRef<Map<string, THREE.Vector3>>(new Map());
+
+  const clustersWithEdges = useMemo(() => {
+    if (!showClusters || clusters.length === 0) return undefined;
+    return computeClustersWithEdges(clusters, allEdgesForMST);
+  }, [showClusters, clusters, allEdgesForMST]);
+
+  const filteredClusters = useMemo(() => {
+    if (!showClusters || !clustersWithEdges) return [];
+    return clustersWithEdges.map((c: ClusterWithEdges) => ({
+      id: c.id,
+      centroidId: c.centroidId,
+      memberIds: c.memberIds,
+      centroidPosition: c.centroidPosition
+    }));
+  }, [showClusters, clustersWithEdges]);
+
+  const clusterCentroids = useMemo(() => {
+    return filteredClusters.map(c => c.centroidId);
+  }, [filteredClusters]);
+
+  const edgesToDisplay = useMemo(() => {
+    if (!showClusters || !clustersWithEdges) return edges;
+    return clustersWithEdges.flatMap((c: ClusterWithEdges) => c.edges);
+  }, [showClusters, clustersWithEdges, edges]);
 
   const highlightedIds = useMemo(() => {
     if (!highlightedTopics) return new Set<string>();
@@ -747,10 +990,26 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
 
   // Color/scale functions
   const highlightColor = useMemo(() => new THREE.Color('#0284c7'), []);
-  const normalColor = useMemo(() => new THREE.Color('#0284c7'), []);
+  const defaultColor = useMemo(() => new THREE.Color('#0284c7'), []);
+
+  // Map topic IDs to cluster colors
+  const topicColorMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (clustersWithEdges) {
+      for (const cluster of clustersWithEdges) {
+        for (const memberId of cluster.memberIds) {
+          map.set(memberId, cluster.color);
+        }
+      }
+    }
+    return map;
+  }, [clustersWithEdges]);
 
   const colorFnHighlighted = useCallback(() => highlightColor, [highlightColor]);
-  const colorFnNormal = useCallback(() => normalColor, [normalColor]);
+  const colorFnNormal = useCallback((topic: TopicWithPosition) => {
+    const clusterColor = topicColorMap.get(topic.id);
+    return clusterColor || defaultColor;
+  }, [topicColorMap, defaultColor]);
 
   const scaleFnHighlighted = useCallback((topic: TopicWithPosition) => {
     const minScale = 0.12;
@@ -766,10 +1025,11 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
     return baseMin + (baseMax - baseMin) * usesScale;
   }, [isDark]);
 
-  // Dim normal stars when there are highlights
   const normalOpacity = highlightedList.length > 0
     ? (isDark ? 0.2 : 0.6)
     : 1.0;
+
+  const enableOrbits = showClusters && highlightedList.length === 0;
 
   const centerNodeId = useMemo(() => {
     if (!highlightedTopics || highlightedTopics.length === 0) return null;
@@ -810,6 +1070,7 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
           centerNodeId={centerNodeId}
           edges={edges}
           animationKey={edgeAnimationKey}
+          orbitalPositionsRef={orbitalPositionsRef}
         />
       )}
 
@@ -822,10 +1083,12 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
           animationKey="proximity"
           cameraPosition={cameraPosition}
           showAll={showAllLabels}
+          orbitalPositionsRef={orbitalPositionsRef}
+          clusterCentroids={clusterCentroids}
+          topicColorMap={topicColorMap}
         />
       )}
 
-      {/* Normal stars */}
       <Stars
         topics={normalList}
         colorFn={colorFnNormal}
@@ -835,9 +1098,11 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
         opacity={normalOpacity}
         clickable={true}
         onTopicClick={onTopicClick}
+        clusters={filteredClusters}
+        enableOrbits={enableOrbits}
+        orbitalPositionsRef={orbitalPositionsRef}
       />
 
-      {/* Highlighted stars */}
       {highlightedList.length > 0 && (
         <Stars
           topics={highlightedList}
@@ -848,11 +1113,14 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
           opacity={1}
           clickable={true}
           onTopicClick={onTopicClick}
+          clusters={filteredClusters}
+          enableOrbits={false}
+          orbitalPositionsRef={orbitalPositionsRef}
         />
       )}
 
-      {edges && edges.length > 0 && (
-        <Edges edges={edges} topicMap={topicMap} centerNodeId={centerNodeId} isDark={isDark} animationKey={edgeAnimationKey} />
+      {edgesToDisplay && edgesToDisplay.length > 0 && (
+        <Edges edges={edgesToDisplay} topicMap={topicMap} centerNodeId={centerNodeId} isDark={isDark} animationKey={edgeAnimationKey} orbitalPositionsRef={orbitalPositionsRef} clustersWithEdges={clustersWithEdges} />
       )}
 
       <CameraAnimation
@@ -864,11 +1132,13 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
   );
 }
 
-export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAllLabels }: StarMapProps) {
+export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAllLabels, showClusters, onClusterCountChange }: StarMapProps) {
   const [bloomReady, setBloomReady] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const { resolvedTheme } = useTheme();
   const [isDark, setIsDark] = useState(true);
+  const [clusters, setClusters] = useState<ClusterInfo[]>([]);
+  const [allEdges, setAllEdges] = useState<TopicEdge[]>([]);
 
   useEffect(() => {
     setBloomReady(true);
@@ -903,6 +1173,20 @@ export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAl
     return () => clearTimeout(timer);
   }, [topics.length]);
 
+  useEffect(() => {
+    identifyClusters(topics).then(setClusters);
+  }, [topics]);
+
+  useEffect(() => {
+    db.topic_edges.toArray().then(setAllEdges);
+  }, []);
+
+  useEffect(() => {
+    if (onClusterCountChange) {
+      onClusterCountChange(clusters.length);
+    }
+  }, [clusters.length, onClusterCountChange]);
+
   if (topics.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
@@ -930,6 +1214,9 @@ export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAl
         isDark={isDark}
         onTopicClick={onTopicClick}
         showAllLabels={showAllLabels}
+        showClusters={showClusters}
+        clusters={clusters}
+        allEdgesForMST={allEdges}
       />
       {bloomReady && (
         <EffectComposer>
