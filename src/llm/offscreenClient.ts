@@ -12,8 +12,8 @@ export async function getEmbeddingFromOffscreen(
     title,
   })
 
-  if (!response.success) {
-    throw new Error(response.error || 'Failed to get embedding')
+  if (!response || !response.success) {
+    throw new Error(response?.error || 'Failed to get embedding')
   }
 
   return response.embedding
@@ -29,8 +29,8 @@ export async function getEmbeddingsFromOffscreen(
     format,
   })
 
-  if (!response.success) {
-    throw new Error(response.error || 'Failed to get embeddings')
+  if (!response || !response.success) {
+    throw new Error(response?.error || 'Failed to get embeddings')
   }
 
   const embeddings = response.embeddings
@@ -45,8 +45,8 @@ export async function warmupModel(): Promise<void> {
     type: 'WARMUP_MODEL',
   })
 
-  if (!response.success) {
-    throw new Error(response.error || 'Failed to warmup model')
+  if (!response || !response.success) {
+    throw new Error(response?.error || 'Failed to warmup model')
   }
 }
 
@@ -60,8 +60,8 @@ export async function computeSimilarityFromOffscreen(embeddings: Tensor): Promis
     shape,
   })
 
-  if (!response.success) {
-    throw new Error(response.error || 'Failed to compute similarity')
+  if (!response || !response.success) {
+    throw new Error(response?.error || 'Failed to compute similarity')
   }
 
   return response.similarityMatrix

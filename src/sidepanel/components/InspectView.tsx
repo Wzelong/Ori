@@ -7,11 +7,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { Search, ListFilter, ArrowUpDown, ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Search, ListFilter, ArrowUpDown, ArrowLeft, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react'
 import { db } from '@/db/database'
 import { InspectTable } from './InspectTable'
 import { TopicDetail } from './TopicDetail'
 import { ItemDetail } from './ItemDetail'
+import { deleteMultipleTopics, deleteMultipleItems } from '@/db/operations'
 import type { Topic, Item } from '@/types/schema'
 
 type FilterMode = 'topics' | 'items'
@@ -26,6 +37,8 @@ export function InspectView() {
   const [selectedItem, setSelectedItem] = useState<{ type: 'topic' | 'item'; id: string } | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize] = useState(16)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   useEffect(() => {
     const loadData = async () => {
@@ -112,6 +125,18 @@ export function InspectView() {
     setSortField('createdAt')
     setSearchQuery('')
     setCurrentPage(1)
+    setSelectedIds(new Set())
+  }
+
+  const handleDelete = async () => {
+    const idsToDelete = Array.from(selectedIds)
+    if (filterMode === 'topics') {
+      await deleteMultipleTopics(idsToDelete)
+    } else {
+      await deleteMultipleItems(idsToDelete)
+    }
+    setSelectedIds(new Set())
+    setShowDeleteDialog(false)
   }
 
   useEffect(() => {
@@ -123,6 +148,8 @@ export function InspectView() {
       setCurrentPage(totalPages)
     }
   }, [currentPage, totalPages])
+
+  const totalCount = filterMode === 'topics' ? filteredAndSortedTopics.length : filteredAndSortedItems.length
 
   return (
     <div className="flex flex-col h-full">
@@ -137,6 +164,20 @@ export function InspectView() {
             <ArrowLeft className="h-4 w-4" />
             Back
           </Button>
+        ) : selectedIds.size > 0 ? (
+          <>
+            <span className="text-xs text-muted-foreground flex-1 pl-1">
+              {selectedIds.size} of {totalCount} Selected
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 cursor-pointer transition-colors hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setShowDeleteDialog(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </>
         ) : (
           <>
             <div className="relative flex-1">
@@ -222,6 +263,8 @@ export function InspectView() {
                 topics={paginatedTopics}
                 items={paginatedItems}
                 onRowClick={handleRowClick}
+                selectedIds={selectedIds}
+                onSelectionChange={setSelectedIds}
               />
             </div>
             <div className="flex items-center justify-between p-3 border-t text-xs text-muted-foreground">
@@ -255,6 +298,22 @@ export function InspectView() {
           </>
         )}
       </div>
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} {filterMode === 'topics' ? 'topic' : 'item'}{selectedIds.size !== 1 ? 's' : ''}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the selected {filterMode === 'topics' ? 'topic' : 'item'}{selectedIds.size !== 1 ? 's' : ''} and all associated relationships. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
