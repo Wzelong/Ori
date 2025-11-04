@@ -1,5 +1,9 @@
+import Graph from 'graphology';
+import louvain from 'graphology-communities-louvain';
 import { db } from '../db/database';
 import type { TopicWithPosition, TopicEdge } from '../types/schema';
+import { loadVector } from '../llm/embeddings';
+import { findSemanticMedoid } from './vectorUtils';
 
 export interface ClusterInfo {
   id: number;
@@ -11,125 +15,88 @@ export interface ClusterInfo {
 export interface ClusterWithEdges extends ClusterInfo {
   color: string;
   edges: TopicEdge[];
+  edgeDepths: Map<string, number>;
+  edgeDirections: Map<string, { from: string; to: string }>;
 }
 
-function buildAdjacencyList(topics: TopicWithPosition[], edges: TopicEdge[], minSimilarity: number): Map<string, string[]> {
-  const graph = new Map<string, string[]>();
-  topics.forEach(t => graph.set(t.id, []));
+export async function identifyClusters(
+  topics: TopicWithPosition[],
+  resolution: number = 1.0,
+  minClusterSize: number = 2
+): Promise<ClusterInfo[]> {
+  if (topics.length < 2) return [];
 
-  edges
-    .filter(e => e.similarity >= minSimilarity)
-    .forEach(e => {
-      if (graph.has(e.src) && graph.has(e.dst)) {
-        graph.get(e.src)!.push(e.dst);
-        graph.get(e.dst)!.push(e.src);
+  const allEdges = await db.topic_edges.toArray();
+  const topicIds = new Set(topics.map(t => t.id));
+
+  const graphEdges = allEdges
+    .filter(e => topicIds.has(e.src) && topicIds.has(e.dst));
+
+  const graph = new Graph();
+  const sortedTopics = [...topics].sort((a, b) => a.id.localeCompare(b.id));
+  sortedTopics.forEach(t => graph.addNode(t.id));
+
+  const sortedEdges = [...graphEdges].sort((a, b) => {
+    const cmp = a.src.localeCompare(b.src);
+    return cmp !== 0 ? cmp : a.dst.localeCompare(b.dst);
+  });
+
+  sortedEdges.forEach(e => {
+    if (!graph.hasEdge(e.src, e.dst)) {
+      graph.addEdge(e.src, e.dst, { weight: e.similarity });
+    }
+  });
+
+  const communities = louvain(graph, { resolution, randomWalk: false });
+
+  const clusterMap = new Map<number, string[]>();
+  const nodeToCluster = new Map<string, number>();
+
+  Object.entries(communities).forEach(([nodeId, commId]) => {
+    if (nodeToCluster.has(nodeId)) {
+      console.warn(`Node ${nodeId} already assigned to cluster ${nodeToCluster.get(nodeId)}, trying to reassign to ${commId}`);
+    }
+    nodeToCluster.set(nodeId, commId);
+
+    if (!clusterMap.has(commId)) clusterMap.set(commId, []);
+    clusterMap.get(commId)!.push(nodeId);
+  });
+
+  const clusters: ClusterInfo[] = [];
+  const clusterEntries = Array.from(clusterMap.entries()).filter(
+    ([_, members]) => members.length >= minClusterSize
+  );
+
+  for (const [clusterId, memberIds] of clusterEntries) {
+    const memberEmbeddings = await Promise.all(
+      memberIds.map(id => loadVector(db, 'topic', id))
+    );
+
+    const validMembers: string[] = [];
+    const validEmbeddings: number[][] = [];
+
+    memberIds.forEach((id, i) => {
+      if (memberEmbeddings[i] !== null) {
+        validMembers.push(id);
+        validEmbeddings.push(memberEmbeddings[i]!);
       }
     });
 
-  return graph;
-}
+    if (validEmbeddings.length === 0) continue;
 
-function findConnectedComponents(topics: TopicWithPosition[], graph: Map<string, string[]>): string[][] {
-  const visited = new Set<string>();
-  const clusters: string[][] = [];
+    const centroidId = findSemanticMedoid(validEmbeddings, validMembers);
+    const centroidTopic = topics.find(t => t.id === centroidId)!;
 
-  for (const topic of topics) {
-    if (visited.has(topic.id)) continue;
-
-    const cluster: string[] = [];
-    const queue: string[] = [topic.id];
-
-    while (queue.length > 0) {
-      const id = queue.shift()!;
-      if (visited.has(id)) continue;
-
-      visited.add(id);
-      cluster.push(id);
-
-      const neighbors = graph.get(id) || [];
-      neighbors.forEach(neighbor => {
-        if (!visited.has(neighbor)) queue.push(neighbor);
-      });
-    }
-
-    if (cluster.length >= 2) {
-      clusters.push(cluster);
-    }
+    clusters.push({
+      id: clusterId,
+      centroidId,
+      memberIds: validMembers,
+      centroidPosition: [centroidTopic.x, centroidTopic.y, centroidTopic.z]
+    });
   }
 
   return clusters;
 }
-
-function findMostConnectedNode(clusterIds: string[], edges: TopicEdge[]): string {
-  const edgeCount = new Map<string, number>();
-  clusterIds.forEach(id => edgeCount.set(id, 0));
-
-  const clusterSet = new Set(clusterIds);
-
-  for (const edge of edges) {
-    if (clusterSet.has(edge.src) && clusterSet.has(edge.dst)) {
-      edgeCount.set(edge.src, (edgeCount.get(edge.src) || 0) + 1);
-      edgeCount.set(edge.dst, (edgeCount.get(edge.dst) || 0) + 1);
-    }
-  }
-
-  let maxEdges = -1;
-  let centroidId = clusterIds[0];
-
-  for (const id of clusterIds) {
-    const count = edgeCount.get(id) || 0;
-    if (count > maxEdges) {
-      maxEdges = count;
-      centroidId = id;
-    }
-  }
-
-  return centroidId;
-}
-
-export async function identifyClusters(topics: TopicWithPosition[]): Promise<ClusterInfo[]> {
-  if (topics.length < 2) return [];
-
-  const edges = await db.topic_edges.toArray();
-  const graph = buildAdjacencyList(topics, edges, 0);
-  const clusterIdArrays = findConnectedComponents(topics, graph);
-
-  const clusters: ClusterInfo[] = [];
-  const topicMap = new Map(topics.map(t => [t.id, t]));
-
-  for (let i = 0; i < clusterIdArrays.length; i++) {
-    const clusterIds = clusterIdArrays[i];
-    const centroidId = findMostConnectedNode(clusterIds, edges);
-    const centroidTopic = topicMap.get(centroidId);
-
-    if (centroidTopic) {
-      clusters.push({
-        id: i,
-        centroidId,
-        memberIds: clusterIds,
-        centroidPosition: [centroidTopic.x, centroidTopic.y, centroidTopic.z]
-      });
-    }
-  }
-
-  return clusters;
-}
-
-export function getOrbitDataForTopic(
-  topicId: string,
-  clusters: ClusterInfo[]
-): { centroid: [number, number, number]; isCentroid: boolean } | null {
-  for (const cluster of clusters) {
-    if (cluster.centroidId === topicId) {
-      return { centroid: cluster.centroidPosition, isCentroid: true };
-    }
-    if (cluster.memberIds.includes(topicId)) {
-      return { centroid: cluster.centroidPosition, isCentroid: false };
-    }
-  }
-  return null;
-}
-
 
 function generateClusterColors(count: number): string[] {
   const predefinedColors = [
@@ -151,37 +118,52 @@ function generateClusterColors(count: number): string[] {
   });
 }
 
-function filterConnectedMembers(cluster: ClusterInfo, allEdges: TopicEdge[]): string[] {
+function computeClusterEdges(cluster: ClusterInfo, allEdges: TopicEdge[]): {
+  edges: TopicEdge[];
+  depths: Map<string, number>;
+  directions: Map<string, { from: string; to: string }>;
+} {
   const memberSet = new Set(cluster.memberIds);
   const centroidId = cluster.centroidId;
 
-  // Find nodes with direct edges to centroid
-  const directlyConnected = new Set<string>([centroidId]);
+  const adjacency = new Map<string, Array<{ node: string; edge: TopicEdge }>>();
 
-  for (const edge of allEdges) {
-    if ((edge.src === centroidId && memberSet.has(edge.dst)) ||
-        (edge.dst === centroidId && memberSet.has(edge.src))) {
-      const connectedNode = edge.src === centroidId ? edge.dst : edge.src;
-      directlyConnected.add(connectedNode);
+  allEdges.forEach(edge => {
+    if (memberSet.has(edge.src) && memberSet.has(edge.dst)) {
+      if (!adjacency.has(edge.src)) adjacency.set(edge.src, []);
+      if (!adjacency.has(edge.dst)) adjacency.set(edge.dst, []);
+      adjacency.get(edge.src)!.push({ node: edge.dst, edge });
+      adjacency.get(edge.dst)!.push({ node: edge.src, edge });
     }
+  });
+
+  const mstEdges: TopicEdge[] = [];
+  const edgeDepthMap = new Map<string, number>();
+  const edgeDirections = new Map<string, { from: string; to: string }>();
+  const visited = new Set<string>();
+  const queue: Array<{ nodeId: string; depth: number }> = [];
+
+  visited.add(centroidId);
+  queue.push({ nodeId: centroidId, depth: 0 });
+
+  while (queue.length > 0 && visited.size < cluster.memberIds.length) {
+    const { nodeId, depth } = queue.shift()!;
+    const neighbors = adjacency.get(nodeId) || [];
+
+    const sortedNeighbors = [...neighbors].sort((a, b) => b.edge.similarity - a.edge.similarity);
+
+    sortedNeighbors.forEach(({ node, edge }) => {
+      if (!visited.has(node)) {
+        visited.add(node);
+        mstEdges.push(edge);
+        edgeDepthMap.set(edge.id, depth + 1);
+        edgeDirections.set(edge.id, { from: nodeId, to: node });
+        queue.push({ nodeId: node, depth: depth + 1 });
+      }
+    });
   }
 
-  return Array.from(directlyConnected);
-}
-
-function computeClusterEdges(cluster: ClusterInfo, allEdges: TopicEdge[]): TopicEdge[] {
-  const memberSet = new Set(cluster.memberIds);
-  const centroidId = cluster.centroidId;
-
-  // Get all edges within the cluster
-  const clusterEdges = allEdges.filter(e =>
-    memberSet.has(e.src) && memberSet.has(e.dst)
-  );
-
-  // Only return edges where centroid is one endpoint
-  return clusterEdges.filter(e =>
-    e.src === centroidId || e.dst === centroidId
-  );
+  return { edges: mstEdges, depths: edgeDepthMap, directions: edgeDirections };
 }
 
 export function computeClustersWithEdges(
@@ -191,16 +173,13 @@ export function computeClustersWithEdges(
   const colors = generateClusterColors(clusters.length);
 
   return clusters.map((cluster, index) => {
-    const connectedMembers = filterConnectedMembers(cluster, allEdges);
-    const filteredCluster: ClusterInfo = {
-      ...cluster,
-      memberIds: connectedMembers
-    };
-
+    const { edges, depths, directions } = computeClusterEdges(cluster, allEdges);
     return {
-      ...filteredCluster,
+      ...cluster,
       color: colors[index],
-      edges: computeClusterEdges(filteredCluster, allEdges)
+      edges,
+      edgeDepths: depths,
+      edgeDirections: directions
     };
   });
 }

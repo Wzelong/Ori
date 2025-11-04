@@ -1,4 +1,5 @@
-import { getEmbedding, getEmbeddings, computeSimilarity } from '../llm/embeddings'
+import { getEmbedding, getEmbeddings } from '../llm/embeddings'
+import { computeSimilarity } from '../services/vectorUtils'
 import { Tensor } from '@huggingface/transformers'
 
 

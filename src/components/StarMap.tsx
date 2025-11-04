@@ -8,7 +8,7 @@ import { useTheme } from 'next-themes';
 
 import type { TopicSearchResult } from '@/services/search';
 import type { TopicWithPosition, TopicEdge } from '@/types/schema';
-import { identifyClusters, getOrbitDataForTopic, computeClustersWithEdges } from '@/services/clustering';
+import { identifyClusters, computeClustersWithEdges } from '@/services/clustering';
 import type { ClusterInfo, ClusterWithEdges } from '@/services/clustering';
 import { db } from '@/db/database';
 
@@ -31,21 +31,13 @@ interface StarsProps {
   opacity?: number;
   clickable?: boolean;
   onTopicClick?: (topic: TopicWithPosition) => void;
-  clusters?: ClusterInfo[];
-  enableOrbits?: boolean;
-  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
 }
 
-function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, clickable = false, onTopicClick, clusters, enableOrbits = false, orbitalPositionsRef }: StarsProps) {
+function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, clickable = false, onTopicClick }: StarsProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const count = topics.length;
   const [hovered, setHovered] = useState(false);
   const pointerDownTimeRef = useRef<number>(0);
-  const basePositionsRef = useRef<Float32Array>(new Float32Array(count * 3));
-  const currentPositionsRef = useRef<Float32Array>(new Float32Array(count * 3));
-  const initializedRef = useRef(false);
-  const orbitStartTimeRef = useRef<number>(0);
-  const orbitAngleOffsetsRef = useRef<Float32Array>(new Float32Array(count));
 
   useEffect(() => {
     if (clickable) {
@@ -87,22 +79,6 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
   }, [topics, colorFn, scaleFn, count]);
 
   useEffect(() => {
-    for (let i = 0; i < count; i++) {
-      basePositionsRef.current[i * 3 + 0] = positions[i * 3 + 0];
-      basePositionsRef.current[i * 3 + 1] = positions[i * 3 + 1];
-      basePositionsRef.current[i * 3 + 2] = positions[i * 3 + 2];
-
-      // Only initialize current positions once, don't overwrite them
-      if (!initializedRef.current) {
-        currentPositionsRef.current[i * 3 + 0] = positions[i * 3 + 0];
-        currentPositionsRef.current[i * 3 + 1] = positions[i * 3 + 1];
-        currentPositionsRef.current[i * 3 + 2] = positions[i * 3 + 2];
-      }
-    }
-    initializedRef.current = true;
-  }, [positions, count]);
-
-  useEffect(() => {
     if (!meshRef.current) return;
 
     for (let i = 0; i < count; i++) {
@@ -133,119 +109,6 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
     }
   }, [positions, scales, colors, count, tempObj, tempColor, isDark]);
 
-  useFrame(({ clock }) => {
-    if (!meshRef.current) return;
-
-    if (enableOrbits && clusters && clusters.length > 0) {
-      const justEnabled = orbitStartTimeRef.current === 0;
-      if (justEnabled) {
-        orbitStartTimeRef.current = clock.getElapsedTime();
-      }
-
-      const elapsed = clock.getElapsedTime() - orbitStartTimeRef.current;
-
-      for (let i = 0; i < count; i++) {
-        const topic = topics[i];
-        const orbitData = getOrbitDataForTopic(topic.id, clusters);
-
-        if (orbitData && !orbitData.isCentroid) {
-          const [cx, cy, cz] = orbitData.centroid;
-          const bx = basePositionsRef.current[i * 3 + 0];
-          const by = basePositionsRef.current[i * 3 + 1];
-          const bz = basePositionsRef.current[i * 3 + 2];
-
-          const dx = bx - cx;
-          const dy = by - cy;
-          const dz = bz - cz;
-          const radius = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-          if (radius >= 0.01) {
-            const radialVec = new THREE.Vector3(dx, dy, dz).normalize();
-            const up = new THREE.Vector3(0, 1, 0);
-            const axis = new THREE.Vector3().crossVectors(radialVec, up).normalize();
-
-            if (axis.length() < 0.01) {
-              axis.set(1, 0, 0);
-            }
-
-            // Calculate angle offset from current position when first enabled
-            if (justEnabled) {
-              const currentVec = new THREE.Vector3(
-                currentPositionsRef.current[i * 3 + 0] - cx,
-                currentPositionsRef.current[i * 3 + 1] - cy,
-                currentPositionsRef.current[i * 3 + 2] - cz
-              );
-              const baseVec = new THREE.Vector3(dx, dy, dz);
-
-              orbitAngleOffsetsRef.current[i] = Math.atan2(
-                new THREE.Vector3().crossVectors(baseVec, currentVec).dot(axis),
-                baseVec.dot(currentVec)
-              );
-            }
-
-            const speed = 0.2 + (i % 10) * 0.02;
-            const angle = orbitAngleOffsetsRef.current[i] + elapsed * speed;
-
-            const rotated = new THREE.Vector3(dx, dy, dz);
-            rotated.applyAxisAngle(axis, angle);
-
-            tempObj.position.set(
-              cx + rotated.x,
-              cy + rotated.y,
-              cz + rotated.z
-            );
-
-            currentPositionsRef.current[i * 3 + 0] = tempObj.position.x;
-            currentPositionsRef.current[i * 3 + 1] = tempObj.position.y;
-            currentPositionsRef.current[i * 3 + 2] = tempObj.position.z;
-          } else {
-            tempObj.position.set(bx, by, bz);
-            currentPositionsRef.current[i * 3 + 0] = bx;
-            currentPositionsRef.current[i * 3 + 1] = by;
-            currentPositionsRef.current[i * 3 + 2] = bz;
-          }
-        } else {
-          const bx = basePositionsRef.current[i * 3 + 0];
-          const by = basePositionsRef.current[i * 3 + 1];
-          const bz = basePositionsRef.current[i * 3 + 2];
-          tempObj.position.set(bx, by, bz);
-          currentPositionsRef.current[i * 3 + 0] = bx;
-          currentPositionsRef.current[i * 3 + 1] = by;
-          currentPositionsRef.current[i * 3 + 2] = bz;
-        }
-
-        if (orbitalPositionsRef?.current) {
-          orbitalPositionsRef.current.set(topic.id, tempObj.position.clone());
-        }
-
-        tempObj.scale.setScalar(scales[i]);
-        tempObj.updateMatrix();
-        meshRef.current.setMatrixAt(i, tempObj.matrix);
-      }
-    } else {
-      orbitStartTimeRef.current = 0;
-
-      for (let i = 0; i < count; i++) {
-        const topic = topics[i];
-
-        tempObj.position.set(
-          currentPositionsRef.current[i * 3 + 0],
-          currentPositionsRef.current[i * 3 + 1],
-          currentPositionsRef.current[i * 3 + 2]
-        );
-
-        if (orbitalPositionsRef?.current) {
-          orbitalPositionsRef.current.set(topic.id, tempObj.position.clone());
-        }
-
-        tempObj.scale.setScalar(scales[i]);
-        tempObj.updateMatrix();
-        meshRef.current.setMatrixAt(i, tempObj.matrix);
-      }
-    }
-
-    meshRef.current.instanceMatrix.needsUpdate = true;
-  });
 
   const handlePointerDown = () => {
     if (clickable) {
@@ -307,78 +170,111 @@ interface EdgesProps {
   centerNodeId: string | null;
   isDark: boolean;
   animationKey: string;
-  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
   clustersWithEdges?: ClusterWithEdges[];
+  edgeDirections?: Map<string, { from: string; to: string }>;
 }
 
-interface AnimatedLineProps {
+interface EdgeAnimationData {
   start: THREE.Vector3;
   end: THREE.Vector3;
-  srcId: string;
-  dstId: string;
   color: string;
   opacity: number;
   delay: number;
   reversed: boolean;
-  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
+  progress: number;
+  point1: THREE.Vector3;
+  point2: THREE.Vector3;
 }
 
-function AnimatedLine({ start, end, srcId, dstId, color, opacity, delay, reversed, orbitalPositionsRef }: AnimatedLineProps) {
-  const [progress, setProgress] = useState(0);
+interface AnimatedEdgesProps {
+  lines: Array<{
+    start: THREE.Vector3;
+    end: THREE.Vector3;
+    color: string;
+    opacity: number;
+    delay: number;
+    reversed: boolean;
+  }>;
+}
+
+function AnimatedEdges({ lines }: AnimatedEdgesProps) {
   const startTimeRef = useRef<number | null>(null);
-  const point1 = useRef(new THREE.Vector3());
-  const point2 = useRef(new THREE.Vector3());
-  const tempVec = useRef(new THREE.Vector3());
   const [, forceUpdate] = useState(0);
-  const currentStart = useRef(start.clone());
-  const currentEnd = useRef(end.clone());
+  const animationDataRef = useRef<EdgeAnimationData[]>([]);
+
+  if (animationDataRef.current.length !== lines.length) {
+    animationDataRef.current = lines.map(line => ({
+      ...line,
+      progress: 0,
+      point1: new THREE.Vector3(),
+      point2: new THREE.Vector3()
+    }));
+  } else {
+    // Update colors and opacity without resetting animation
+    lines.forEach((line, i) => {
+      if (animationDataRef.current[i]) {
+        animationDataRef.current[i].color = line.color;
+        animationDataRef.current[i].opacity = line.opacity;
+      }
+    });
+  }
 
   useFrame(({ clock }) => {
-    if (orbitalPositionsRef?.current) {
-      const srcPos = orbitalPositionsRef.current.get(srcId);
-      const dstPos = orbitalPositionsRef.current.get(dstId);
-      if (srcPos) currentStart.current.copy(srcPos);
-      if (dstPos) currentEnd.current.copy(dstPos);
-    }
-
     if (startTimeRef.current === null) {
       startTimeRef.current = clock.getElapsedTime();
     }
 
-    const elapsed = clock.getElapsedTime() - startTimeRef.current - delay;
-    if (elapsed < 0) return;
-
     const animationDuration = 0.5;
-    const newProgress = Math.min(1, elapsed / animationDuration);
+    const currentTime = clock.getElapsedTime();
+    let needsUpdate = false;
 
-    if (reversed) {
-      tempVec.current.lerpVectors(currentEnd.current, currentStart.current, newProgress);
-      point1.current.copy(tempVec.current);
-      point2.current.copy(currentEnd.current);
-    } else {
-      tempVec.current.lerpVectors(currentStart.current, currentEnd.current, newProgress);
-      point1.current.copy(currentStart.current);
-      point2.current.copy(tempVec.current);
+    animationDataRef.current.forEach((data, i) => {
+      const elapsed = currentTime - startTimeRef.current! - data.delay;
+      if (elapsed < 0) return;
+
+      const newProgress = Math.min(1, elapsed / animationDuration);
+      if (newProgress !== data.progress) {
+        data.progress = newProgress;
+        needsUpdate = true;
+
+        const tempVec = new THREE.Vector3();
+        if (data.reversed) {
+          tempVec.lerpVectors(data.end, data.start, newProgress);
+          data.point1.copy(tempVec);
+          data.point2.copy(data.end);
+        } else {
+          tempVec.lerpVectors(data.start, data.end, newProgress);
+          data.point1.copy(data.start);
+          data.point2.copy(tempVec);
+        }
+      }
+    });
+
+    if (needsUpdate) {
+      forceUpdate(prev => prev + 1);
     }
-
-    setProgress(newProgress);
-    forceUpdate(prev => prev + 1);
   });
 
-  if (progress === 0) return null;
-
   return (
-    <Line
-      points={[point1.current, point2.current]}
-      color={color}
-      lineWidth={2}
-      transparent
-      opacity={opacity * progress}
-    />
+    <>
+      {animationDataRef.current.map((data, i) => {
+        if (data.progress === 0) return null;
+        return (
+          <Line
+            key={i}
+            points={[data.point1, data.point2]}
+            color={data.color}
+            lineWidth={2}
+            transparent
+            opacity={data.opacity * data.progress}
+          />
+        );
+      })}
+    </>
   );
 }
 
-function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, orbitalPositionsRef, clustersWithEdges }: EdgesProps) {
+function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, clustersWithEdges, edgeDirections }: EdgesProps) {
   const adjacency = useMemo(() => {
     const adj = new Map<string, Set<string>>();
     edges.forEach(edge => {
@@ -420,13 +316,16 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, orbitalPos
         const dst = topicMap.get(edge.dst);
         if (!src || !dst) return null;
 
+        const direction = edgeDirections?.get(edge.id);
+        const reversed = direction ? direction.to === edge.src : false;
+
         return {
           start: new THREE.Vector3(src.x, src.y, src.z),
           end: new THREE.Vector3(dst.x, dst.y, dst.z),
           srcId: edge.src,
           dstId: edge.dst,
           similarity: edge.similarity,
-          reversed: false,
+          reversed,
           distance: index
         };
       }).filter((line): line is { start: THREE.Vector3; end: THREE.Vector3; srcId: string; dstId: string; similarity: number; reversed: boolean; distance: number } =>
@@ -461,7 +360,7 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, orbitalPos
           line !== null
       )
       .sort((a, b) => a.distance - b.distance);
-  }, [edges, topicMap, centerNodeId, distances]);
+  }, [edges, topicMap, centerNodeId, distances, edgeDirections]);
 
   if (lines.length === 0) return null;
 
@@ -479,35 +378,33 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, orbitalPos
     return cluster?.color || defaultEdgeColor;
   };
 
+  const animatedLines = useMemo(() => {
+    return lines.map(line => {
+      const edgeColor = getEdgeColor(line.srcId, line.dstId);
+
+      const baseOpacity = Math.max(0.2, (line.similarity - 0.82) * 5);
+      const darkOpacity = Math.min(0.8, baseOpacity);
+      const opacity = isDark ? darkOpacity : 0.8;
+      const animationDuration = 0.5;
+
+      const delay = centerNodeId
+        ? 1.0 + line.distance * (animationDuration + 0.05)
+        : 0.5 + (line.distance * 0.01);
+
+      return {
+        start: line.start,
+        end: line.end,
+        color: edgeColor,
+        opacity,
+        delay,
+        reversed: line.reversed
+      };
+    });
+  }, [lines, centerNodeId, isDark, clustersWithEdges]);
+
   return (
     <group key={animationKey}>
-      {lines.map((line, i) => {
-        const edgeColor = getEdgeColor(line.srcId, line.dstId);
-
-        const baseOpacity = Math.max(0.2, (line.similarity - 0.82) * 5);
-        const darkOpacity = Math.min(0.8, baseOpacity);
-        const opacity = isDark ? darkOpacity : 0.8;
-        const animationDuration = 0.5;
-
-        const delay = centerNodeId
-          ? 1.0 + line.distance * (animationDuration + 0.05)
-          : 0.5 + (line.distance * 0.01);
-
-        return (
-          <AnimatedLine
-            key={i}
-            start={line.start}
-            end={line.end}
-            srcId={line.srcId}
-            dstId={line.dstId}
-            color={edgeColor}
-            opacity={opacity}
-            delay={delay}
-            reversed={line.reversed}
-            orbitalPositionsRef={orbitalPositionsRef}
-          />
-        );
-      })}
+      <AnimatedEdges lines={animatedLines} />
     </group>
   );
 }
@@ -520,19 +417,23 @@ interface LabelsProps {
   animationKey: string;
   cameraPosition?: THREE.Vector3;
   showAll?: boolean;
-  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
   clusterCentroids?: string[];
   topicColorMap?: Map<string, string>;
+  showClusters?: boolean;
 }
 
-function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosition, showAll, orbitalPositionsRef, clusterCentroids, topicColorMap }: LabelsProps) {
+function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosition, showAll, clusterCentroids, topicColorMap, showClusters }: LabelsProps) {
   const defaultTextColor = isDark ? '#ffffff' : '#0284c7';
   const [cameraDirection, setCameraDirection] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, -1));
 
   const getTextColor = useCallback((topicId: string): string => {
-    if (isDark || !topicColorMap) return defaultTextColor;
-    return topicColorMap.get(topicId) || defaultTextColor;
-  }, [isDark, topicColorMap, defaultTextColor]);
+    if (showClusters && topicColorMap) {
+      const clusterColor = topicColorMap.get(topicId);
+      if (clusterColor) return clusterColor;
+      return isDark ? '#808080' : '#606060';
+    }
+    return defaultTextColor;
+  }, [showClusters, isDark, topicColorMap, defaultTextColor]);
 
   useFrame(({ camera }) => {
     const direction = new THREE.Vector3();
@@ -643,7 +544,6 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
             textColor={textColor}
             isDark={isDark}
             delay={delay}
-            orbitalPositionsRef={orbitalPositionsRef}
           />
         ) : (
           <StaticLabel
@@ -651,7 +551,6 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
             topic={topic}
             textColor={textColor}
             isDark={isDark}
-            orbitalPositionsRef={orbitalPositionsRef}
           />
         );
       })}
@@ -663,22 +562,12 @@ interface StaticLabelProps {
   topic: TopicWithPosition;
   textColor: string;
   isDark: boolean;
-  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
 }
 
-function StaticLabel({ topic, textColor, isDark, orbitalPositionsRef }: StaticLabelProps) {
+function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
   const [opacity, setOpacity] = useState(0);
   const mountedRef = useRef(false);
-  const [position, setPosition] = useState<[number, number, number]>([topic.x, topic.y - 0.6, topic.z]);
-
-  useFrame(() => {
-    if (orbitalPositionsRef?.current) {
-      const orbitalPos = orbitalPositionsRef.current.get(topic.id);
-      if (orbitalPos) {
-        setPosition([orbitalPos.x, orbitalPos.y - 0.6, orbitalPos.z]);
-      }
-    }
-  });
+  const position: [number, number, number] = [topic.x, topic.y - 0.6, topic.z];
 
   useEffect(() => {
     if (!mountedRef.current) {
@@ -729,13 +618,12 @@ interface AnimatedLabelProps {
   textColor: string;
   isDark: boolean;
   delay: number;
-  orbitalPositionsRef?: React.RefObject<Map<string, THREE.Vector3>>;
 }
 
-function AnimatedLabel({ topic, textColor, isDark, delay, orbitalPositionsRef }: AnimatedLabelProps) {
+function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) {
   const [opacity, setOpacity] = useState(0);
   const startTimeRef = useRef<number | null>(null);
-  const [position, setPosition] = useState<[number, number, number]>([topic.x, topic.y - 0.6, topic.z]);
+  const position: [number, number, number] = [topic.x, topic.y - 0.6, topic.z];
 
   useFrame(({ clock }) => {
     if (startTimeRef.current === null) {
@@ -751,13 +639,6 @@ function AnimatedLabel({ topic, textColor, isDark, delay, orbitalPositionsRef }:
       setOpacity(timeSinceDelay / 0.3);
     } else {
       setOpacity(1);
-    }
-
-    if (orbitalPositionsRef?.current) {
-      const orbitalPos = orbitalPositionsRef.current.get(topic.id);
-      if (orbitalPos) {
-        setPosition([orbitalPos.x, orbitalPos.y - 0.6, orbitalPos.z]);
-      }
     }
   });
 
@@ -936,7 +817,6 @@ interface SceneInternalProps extends SceneProps {
 
 function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAllLabels, showClusters, clusters, allEdgesForMST }: SceneInternalProps) {
   const [cameraPosition, setCameraPosition] = useState<THREE.Vector3>(new THREE.Vector3(0, 0, 30));
-  const orbitalPositionsRef = useRef<Map<string, THREE.Vector3>>(new Map());
 
   const clustersWithEdges = useMemo(() => {
     if (!showClusters || clusters.length === 0) return undefined;
@@ -959,8 +839,36 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
 
   const edgesToDisplay = useMemo(() => {
     if (!showClusters || !clustersWithEdges) return edges;
-    return clustersWithEdges.flatMap((c: ClusterWithEdges) => c.edges);
+
+    const edgesWithDepth: Array<{ edge: TopicEdge; depth: number }> = [];
+    const seen = new Set<string>();
+
+    clustersWithEdges.forEach((c: ClusterWithEdges) => {
+      c.edges.forEach(edge => {
+        const key = edge.src < edge.dst ? `${edge.src}-${edge.dst}` : `${edge.dst}-${edge.src}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          const depth = c.edgeDepths.get(edge.id) || 0;
+          edgesWithDepth.push({ edge, depth });
+        }
+      });
+    });
+
+    edgesWithDepth.sort((a, b) => a.depth - b.depth);
+    return edgesWithDepth.map(({ edge }) => edge);
   }, [showClusters, clustersWithEdges, edges]);
+
+  const edgeDirectionMap = useMemo(() => {
+    if (!showClusters || !clustersWithEdges) return new Map<string, { from: string; to: string }>();
+
+    const dirMap = new Map<string, { from: string; to: string }>();
+    clustersWithEdges.forEach((c: ClusterWithEdges) => {
+      c.edgeDirections.forEach((dir, edgeId) => {
+        dirMap.set(edgeId, dir);
+      });
+    });
+    return dirMap;
+  }, [showClusters, clustersWithEdges]);
 
   const highlightedIds = useMemo(() => {
     if (!highlightedTopics) return new Set<string>();
@@ -973,7 +881,7 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
     return map;
   }, [topics]);
 
-  const materialKey = isDark ? 'dark' : 'light';
+  const materialKey = `${isDark ? 'dark' : 'light'}-${showClusters ? 'clustered' : 'normal'}`;
   const bgColor = isDark ? '#020617' : '#ffffff';
 
   // Split into two meshes: highlighted vs normal
@@ -991,6 +899,7 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
   // Color/scale functions
   const highlightColor = useMemo(() => new THREE.Color('#0284c7'), []);
   const defaultColor = useMemo(() => new THREE.Color('#0284c7'), []);
+  const orphanColor = useMemo(() => new THREE.Color(isDark ? '#404040' : '#707070'), [isDark]);
 
   // Map topic IDs to cluster colors
   const topicColorMap = useMemo(() => {
@@ -998,6 +907,9 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
     if (clustersWithEdges) {
       for (const cluster of clustersWithEdges) {
         for (const memberId of cluster.memberIds) {
+          if (map.has(memberId)) {
+            console.warn(`Topic ${memberId} appears in multiple clusters: existing color ${map.get(memberId)}, new color ${cluster.color}`);
+          }
           map.set(memberId, cluster.color);
         }
       }
@@ -1007,9 +919,12 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
 
   const colorFnHighlighted = useCallback(() => highlightColor, [highlightColor]);
   const colorFnNormal = useCallback((topic: TopicWithPosition) => {
-    const clusterColor = topicColorMap.get(topic.id);
-    return clusterColor || defaultColor;
-  }, [topicColorMap, defaultColor]);
+    if (showClusters) {
+      const clusterColor = topicColorMap.get(topic.id);
+      return clusterColor || orphanColor;
+    }
+    return defaultColor;
+  }, [showClusters, topicColorMap, defaultColor, orphanColor]);
 
   const scaleFnHighlighted = useCallback((topic: TopicWithPosition) => {
     const minScale = 0.12;
@@ -1029,8 +944,6 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
     ? (isDark ? 0.2 : 0.6)
     : 1.0;
 
-  const enableOrbits = showClusters && highlightedList.length === 0;
-
   const centerNodeId = useMemo(() => {
     if (!highlightedTopics || highlightedTopics.length === 0) return null;
     const highest = highlightedTopics.reduce((max, current) =>
@@ -1040,11 +953,14 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
   }, [highlightedTopics]);
 
   const edgeAnimationKey = useMemo(() => {
+    if (showClusters && clustersWithEdges) {
+      return `clusters-${clustersWithEdges.length}`;
+    }
     if (highlightedList.length > 0) {
       return highlightedList.map(t => t.id).sort().join(',');
     }
     return edges ? `all-edges-${edges.length}` : 'no-edges';
-  }, [highlightedList, edges]);
+  }, [highlightedList, edges, showClusters, clustersWithEdges]);
 
   return (
     <>
@@ -1070,7 +986,7 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
           centerNodeId={centerNodeId}
           edges={edges}
           animationKey={edgeAnimationKey}
-          orbitalPositionsRef={orbitalPositionsRef}
+          showClusters={showClusters}
         />
       )}
 
@@ -1083,9 +999,9 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
           animationKey="proximity"
           cameraPosition={cameraPosition}
           showAll={showAllLabels}
-          orbitalPositionsRef={orbitalPositionsRef}
           clusterCentroids={clusterCentroids}
           topicColorMap={topicColorMap}
+          showClusters={showClusters}
         />
       )}
 
@@ -1098,9 +1014,6 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
         opacity={normalOpacity}
         clickable={true}
         onTopicClick={onTopicClick}
-        clusters={filteredClusters}
-        enableOrbits={enableOrbits}
-        orbitalPositionsRef={orbitalPositionsRef}
       />
 
       {highlightedList.length > 0 && (
@@ -1113,14 +1026,11 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
           opacity={1}
           clickable={true}
           onTopicClick={onTopicClick}
-          clusters={filteredClusters}
-          enableOrbits={false}
-          orbitalPositionsRef={orbitalPositionsRef}
         />
       )}
 
       {edgesToDisplay && edgesToDisplay.length > 0 && (
-        <Edges edges={edgesToDisplay} topicMap={topicMap} centerNodeId={centerNodeId} isDark={isDark} animationKey={edgeAnimationKey} orbitalPositionsRef={orbitalPositionsRef} clustersWithEdges={clustersWithEdges} />
+        <Edges edges={edgesToDisplay} topicMap={topicMap} centerNodeId={centerNodeId} isDark={isDark} animationKey={edgeAnimationKey} clustersWithEdges={clustersWithEdges} edgeDirections={edgeDirectionMap} />
       )}
 
       <CameraAnimation
@@ -1173,9 +1083,13 @@ export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAl
     return () => clearTimeout(timer);
   }, [topics.length]);
 
+  const topicsKey = useMemo(() => {
+    return topics.map(t => t.id).sort().join(',');
+  }, [topics]);
+
   useEffect(() => {
     identifyClusters(topics).then(setClusters);
-  }, [topics]);
+  }, [topicsKey]);
 
   useEffect(() => {
     db.topic_edges.toArray().then(setAllEdges);

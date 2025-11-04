@@ -73,7 +73,7 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="outline" className="h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-default">
+                <Badge variant="outline" className="h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-default select-none">
                   <BookMarked className="h-3 w-3" />
                   {stats.itemCount}
                 </Badge>
@@ -87,7 +87,7 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
               <TooltipTrigger asChild>
                 <Badge
                   variant={showingAllLabels ? "default" : "outline"}
-                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all ${
+                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all select-none ${
                     showingAllLabels
                       ? 'bg-primary text-primary-foreground'
                       : 'hover:bg-accent hover:text-accent-foreground'
@@ -107,7 +107,7 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
               <TooltipTrigger asChild>
                 <Badge
                   variant={showingEdges ? "default" : "outline"}
-                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all ${
+                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all select-none ${
                     showingEdges
                       ? 'bg-primary text-primary-foreground'
                       : 'hover:bg-accent hover:text-accent-foreground'
@@ -127,7 +127,7 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
               <TooltipTrigger asChild>
                 <Badge
                   variant={showingClusters ? "default" : "outline"}
-                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all ${
+                  className={`h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-pointer transition-all select-none ${
                     showingClusters
                       ? 'bg-primary text-primary-foreground'
                       : 'hover:bg-accent hover:text-accent-foreground'

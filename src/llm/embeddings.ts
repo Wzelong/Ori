@@ -1,4 +1,5 @@
-import { AutoTokenizer, AutoModel, env, Tensor, matmul } from '@huggingface/transformers';
+import { AutoTokenizer, AutoModel, env, Tensor } from '@huggingface/transformers';
+import { arrayToArrayBuffer, arrayBufferToArray } from '../services/vectorUtils';
 
 if (env.backends.onnx?.wasm) {
   env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('');
@@ -54,26 +55,6 @@ export async function getEmbeddings(
 
   const { sentence_embedding } = await model(inputs);
   return sentence_embedding;
-}
-
-export async function computeSimilarity(embeddings: Tensor): Promise<number[][]> {
-  const scores = await matmul(embeddings, embeddings.transpose(1, 0));
-  return scores.tolist() as number[][];
-}
-
-export async function computeSimilarityBatch(embedding: number[], otherEmbeddings: number[][]): Promise<number[]> {
-  const allEmbeddings = [embedding, ...otherEmbeddings];
-  const tensor = new Tensor('float32', allEmbeddings.flat(), [allEmbeddings.length, embedding.length]);
-  const similarityMatrix = await computeSimilarity(tensor);
-  return similarityMatrix[0].slice(1);
-}
-
-export function arrayToArrayBuffer(arr: number[]): ArrayBuffer {
-  return new Float32Array(arr).buffer;
-}
-
-export function arrayBufferToArray(buf: ArrayBuffer): number[] {
-  return Array.from(new Float32Array(buf));
 }
 
 export async function storeVector(

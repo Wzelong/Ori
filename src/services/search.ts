@@ -1,27 +1,7 @@
 import { db } from '../db/database';
 import { loadVector } from '../llm/embeddings';
 import type { Item, TopicWithPosition } from '../types/schema';
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) {
-    throw new Error('Vectors must have same length');
-  }
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  const denominator = Math.sqrt(normA) * Math.sqrt(normB);
-  if (denominator === 0) return 0;
-
-  return dotProduct / denominator;
-}
+import { cosineSimilarity } from './vectorUtils';
 
 export interface TopicSearchResult {
   topic: TopicWithPosition;
