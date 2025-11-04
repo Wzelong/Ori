@@ -214,7 +214,7 @@ export function InspectView() {
                     onClick={() => handleFilterChange('items')}
                     className={filterMode === 'items' ? 'bg-accent' : ''}
                   >
-                    Items
+                    Pages
                     <span className="ml-auto text-xs text-muted-foreground">
                       {items.length}
                     </span>
@@ -251,7 +251,10 @@ export function InspectView() {
       <div className="flex-1 overflow-hidden flex flex-col">
         {selectedItem ? (
           selectedItem.type === 'topic' ? (
-            <TopicDetail topicId={selectedItem.id} />
+            <TopicDetail
+              topicId={selectedItem.id}
+              onTopicClick={(topicId) => setSelectedItem({ type: 'topic', id: topicId })}
+            />
           ) : (
             <ItemDetail itemId={selectedItem.id} />
           )

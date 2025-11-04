@@ -129,7 +129,7 @@ export function normalize3D(positions: number[][]): number[][] {
   if (maxRange === 0) return positions;
 
   return positions.map(pos =>
-    pos.map((v, i) => ((v - mins[i]) / maxRange - 0.5) * 20)
+    pos.map((v, i) => ((v - mins[i]) / maxRange - 0.5) * 40)
   );
 }
 

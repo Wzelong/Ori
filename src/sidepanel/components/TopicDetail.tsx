@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { db } from '@/db/database'
@@ -7,11 +8,13 @@ import type { Topic, Item } from '@/types/schema'
 
 interface TopicDetailProps {
   topicId: string
+  onTopicClick?: (topicId: string) => void
 }
 
-export function TopicDetail({ topicId }: TopicDetailProps) {
+export function TopicDetail({ topicId, onTopicClick }: TopicDetailProps) {
   const [topic, setTopic] = useState<Topic | null>(null)
   const [items, setItems] = useState<Item[]>([])
+  const [connectedTopics, setConnectedTopics] = useState<Topic[]>([])
 
   useEffect(() => {
     const loadTopicAndItems = async () => {
@@ -25,6 +28,17 @@ export function TopicDetail({ topicId }: TopicDetailProps) {
       const itemsData = await db.items.where('id').anyOf(itemIds).toArray()
       itemsData.sort((a, b) => b.createdAt - a.createdAt)
       setItems(itemsData)
+
+      const edges = await db.topic_edges.toArray()
+      const connectedTopicIds = new Set<string>()
+      edges.forEach(edge => {
+        if (edge.src === topicId) connectedTopicIds.add(edge.dst)
+        if (edge.dst === topicId) connectedTopicIds.add(edge.src)
+      })
+
+      const connectedTopicsData = await db.topics.where('id').anyOf(Array.from(connectedTopicIds)).toArray()
+      connectedTopicsData.sort((a, b) => b.uses - a.uses)
+      setConnectedTopics(connectedTopicsData)
     }
 
     loadTopicAndItems()
@@ -108,6 +122,31 @@ export function TopicDetail({ topicId }: TopicDetailProps) {
         ) : (
           <Card className="p-6">
             <p className="text-center text-sm text-muted-foreground">No linked items</p>
+          </Card>
+        )}
+      </div>
+
+      <div>
+        <h3 className="text-sm font-medium mb-2 px-1">
+          Connected Topics ({connectedTopics.length})
+        </h3>
+        {connectedTopics.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {connectedTopics.map((connectedTopic) => (
+              <Badge
+                key={connectedTopic.id}
+                variant="secondary"
+                className="text-sm px-3 py-1 cursor-pointer hover:bg-accent"
+                onClick={() => onTopicClick?.(connectedTopic.id)}
+              >
+                {connectedTopic.label}
+                <span className="ml-2 text-xs text-muted-foreground">({connectedTopic.uses})</span>
+              </Badge>
+            ))}
+          </div>
+        ) : (
+          <Card className="p-6">
+            <p className="text-center text-sm text-muted-foreground">No connected topics</p>
           </Card>
         )}
       </div>

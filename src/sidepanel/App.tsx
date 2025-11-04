@@ -8,6 +8,7 @@ import { StatsBar } from './components/StatsBar'
 import { ExploreInput } from './components/ExploreInput'
 import { ItemCard } from './components/ItemCard'
 import { InspectView } from './components/InspectView'
+import { ConfigureView } from './components/ConfigureView'
 import { InsightStream } from './components/InsightStream'
 import { StarMap } from '@/components/StarMap'
 import { db } from '@/db/database'
@@ -18,7 +19,7 @@ import { performRAGSearch } from '@/services/searchOrchestrator'
 
 export default function App() {
   const extraction = useExtraction()
-  const [view, setView] = useState<'explore' | 'inspect'>('explore')
+  const [view, setView] = useState<'explore' | 'inspect' | 'configure'>('explore')
   const [topics, setTopics] = useState<TopicWithPosition[]>([])
   const [highlightedTopics, setHighlightedTopics] = useState<TopicSearchResult[] | undefined>()
   const [edges, setEdges] = useState<TopicEdge[] | undefined>()
@@ -230,8 +231,10 @@ export default function App() {
               )}
             </div>
           </>
-        ) : (
+        ) : view === 'inspect' ? (
           <InspectView />
+        ) : (
+          <ConfigureView />
         )}
       </div>
     </div>

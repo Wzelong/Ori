@@ -4,6 +4,7 @@ import { db } from '../db/database';
 import type { TopicWithPosition, TopicEdge } from '../types/schema';
 import { loadVector } from '../llm/embeddings';
 import { findSemanticMedoid } from './vectorUtils';
+import { getSettings } from './settings';
 
 export interface ClusterInfo {
   id: number;
@@ -21,10 +22,14 @@ export interface ClusterWithEdges extends ClusterInfo {
 
 export async function identifyClusters(
   topics: TopicWithPosition[],
-  resolution: number = 1.0,
-  minClusterSize: number = 2
+  resolution?: number,
+  minClusterSize?: number
 ): Promise<ClusterInfo[]> {
   if (topics.length < 2) return [];
+
+  const settings = await getSettings();
+  const actualResolution = resolution ?? settings.graph.clusterResolution;
+  const actualMinClusterSize = minClusterSize ?? settings.graph.minClusterSize;
 
   const allEdges = await db.topic_edges.toArray();
   const topicIds = new Set(topics.map(t => t.id));
@@ -47,7 +52,7 @@ export async function identifyClusters(
     }
   });
 
-  const communities = louvain(graph, { resolution, randomWalk: false });
+  const communities = louvain(graph, { resolution: actualResolution, randomWalk: false });
 
   const clusterMap = new Map<number, string[]>();
   const nodeToCluster = new Map<string, number>();
@@ -64,7 +69,7 @@ export async function identifyClusters(
 
   const clusters: ClusterInfo[] = [];
   const clusterEntries = Array.from(clusterMap.entries()).filter(
-    ([_, members]) => members.length >= minClusterSize
+    ([_, members]) => members.length >= actualMinClusterSize
   );
 
   for (const [clusterId, memberIds] of clusterEntries) {

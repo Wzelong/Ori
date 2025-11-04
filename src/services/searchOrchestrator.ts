@@ -1,6 +1,7 @@
 import { findSimilarTopics, findSimilarItems } from './search'
 import { expandTopicsWithNeighbors, filterRelevantEdges, getItemsForTopics } from './graph'
 import { generateTextStreaming } from '@/llm/languageModel'
+import { getSettings } from './settings'
 import type { TopicSearchResult, ItemSearchResult } from './search'
 import type { TopicWithPosition, TopicEdge, Item } from '@/types/schema'
 
@@ -20,21 +21,23 @@ export interface SearchOptions {
   expandNeighbors?: boolean
 }
 
-const DEFAULT_OPTIONS: Required<SearchOptions> = {
-  topicCount: 5,
-  itemCount: 10,
-  topicThreshold: 0.5,
-  itemThreshold: 0.5,
-  maxEdges: 20,
-  expandNeighbors: true
-}
-
 export async function performRAGSearch(
   queryEmbedding: number[],
   query: string,
   allTopics: TopicWithPosition[],
   options: SearchOptions = {}
 ): Promise<SearchResult> {
+  const settings = await getSettings();
+
+  const DEFAULT_OPTIONS: Required<SearchOptions> = {
+    topicCount: settings.search.topicResultCount,
+    itemCount: settings.search.itemResultCount,
+    topicThreshold: settings.search.similarityThreshold,
+    itemThreshold: settings.search.similarityThreshold,
+    maxEdges: settings.search.maxEdgesInResults,
+    expandNeighbors: true
+  };
+
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
   const [topicResults, itemResults] = await Promise.all([

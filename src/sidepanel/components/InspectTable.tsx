@@ -3,6 +3,8 @@ import { ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { Topic, Item } from '@/types/schema'
+import { useState, useEffect } from 'react'
+import { db } from '@/db/database'
 
 interface InspectTableProps {
   mode: 'topics' | 'items'
@@ -14,6 +16,26 @@ interface InspectTableProps {
 }
 
 export function InspectTable({ mode, topics, items, onRowClick, selectedIds, onSelectionChange }: InspectTableProps) {
+  const [edgeCounts, setEdgeCounts] = useState<Map<string, number>>(new Map())
+
+  useEffect(() => {
+    if (mode === 'topics') {
+      const loadEdgeCounts = async () => {
+        const allEdges = await db.topic_edges.toArray()
+        const counts = new Map<string, number>()
+
+        allEdges.forEach(edge => {
+          counts.set(edge.src, (counts.get(edge.src) || 0) + 1)
+          counts.set(edge.dst, (counts.get(edge.dst) || 0) + 1)
+        })
+
+        setEdgeCounts(counts)
+      }
+
+      loadEdgeCounts()
+    }
+  }, [mode, topics.length])
+
   const formatDate = (timestamp: number) => {
     const now = Date.now()
     const diff = now - timestamp
@@ -60,7 +82,7 @@ export function InspectTable({ mode, topics, items, onRowClick, selectedIds, onS
       <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[40%]">
+              <TableHead className="w-[50%]">
                 <div className="flex items-center gap-2">
                   <Checkbox
                     checked={isAllSelected}
@@ -71,8 +93,9 @@ export function InspectTable({ mode, topics, items, onRowClick, selectedIds, onS
                   <span>Label</span>
                 </div>
               </TableHead>
-              <TableHead className="w-[20%]">Uses</TableHead>
-              <TableHead className="w-[40%]">Created</TableHead>
+              <TableHead className="w-[15%]">Uses</TableHead>
+              <TableHead className="w-[15%]">Edges</TableHead>
+              <TableHead className="w-[20%]">Created</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -96,12 +119,13 @@ export function InspectTable({ mode, topics, items, onRowClick, selectedIds, onS
                     </div>
                   </TableCell>
                   <TableCell className="whitespace-nowrap">{topic.uses}</TableCell>
+                  <TableCell className="whitespace-nowrap">{edgeCounts.get(topic.id) || 0}</TableCell>
                   <TableCell className="text-muted-foreground whitespace-nowrap">{formatDate(topic.createdAt)}</TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
-                <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
                   No topics found
                 </TableCell>
               </TableRow>

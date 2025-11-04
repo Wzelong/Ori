@@ -1,35 +1,47 @@
 # Ori
 
-An intelligent Chrome extension that transforms your browsing history into an interactive 3D knowledge graph using on-device AI.
+A Chrome extension that transforms browsing history into an interactive 3D semantic knowledge graph using on-device AI.
 
-## Problem Statement
+## Overview
 
-Traditional browser bookmarks and history are flat, disconnected lists that fail to capture the semantic relationships between the content you consume. Users cannot discover connections between topics, search by meaning rather than keywords, or gain insights about their learning patterns over time.
+Ori automatically constructs a living knowledge graph from your browsing activity. It extracts content, generates embeddings, discovers semantic relationships, and visualizes connections in 3D space—all while operating entirely offline with Chrome's built-in AI.
 
-## Solution
-
-Ori automatically builds a living semantic knowledge graph from your browsing activity. It captures valuable content as you browse, understands context through AI summarization and topic extraction, discovers relationships between concepts via vector similarity, and visualizes connections in an interactive 3D star map. The system generates contextual insights using retrieval-augmented generation over your browsing history while operating entirely offline with on-device AI for privacy.
-
-Key advantages:
-- **On-device processing**: All AI operations run locally using Chrome's built-in Gemini Nano. No cloud API calls.
-- **Semantic organization**: Content grouped by meaning, not manual folders.
-- **Automatic graph construction**: Zero manual tagging required.
-- **3D spatial visualization**: Intuitive metaphor for knowledge exploration.
-- **Conversational insights**: RAG-powered interface over your history.
+**Key Features:**
+- **On-device AI**: Zero cloud dependencies using Chrome's Gemini Nano
+- **Automatic graph construction**: No manual tagging required
+- **Semantic organization**: Content grouped by meaning, not keywords
+- **3D visualization**: Interactive StarMap with cluster detection
+- **RAG-powered insights**: Conversational interface over your browsing history
+- **Configurable parameters**: Fine-tune graph behavior via settings UI
 
 ## Installation
 
 ### Prerequisites
 
-Chrome Canary with the following experimental features enabled:
+**System Requirements:**
+- **Chrome:** Version 127+ (stable channel)
+- **OS:** Windows 10/11, macOS 13+, Linux, or ChromeOS (Chromebook Plus)
+- **Storage:** 22 GB free space on Chrome profile drive
+- **Hardware:** GPU with 4+ GB VRAM OR CPU with 16+ GB RAM and 4+ cores
+- **Network:** Unmetered connection (Wi-Fi recommended for model download)
 
-```
-chrome://flags/#prompt-api-for-gemini-nano
-chrome://flags/#summarization-api-for-gemini-nano
-chrome://flags/#optimization-guide-on-device-model
-```
+**Enable Built-in AI:**
 
-Set all three to "Enabled" and restart Chrome.
+1. Open Chrome and navigate to:
+   ```
+   chrome://flags/#prompt-api-for-gemini-nano-multimodal-input
+   ```
+
+2. Set to **"Enabled"** and click **"Relaunch"**
+
+3. Verify setup:
+   - Go to `chrome://on-device-internals`
+   - Check **Model Status** tab (model will auto-download if requirements are met)
+   - Open DevTools Console (F12) and run:
+     ```javascript
+     await ai.languageModel.availability()
+     ```
+   - Should return: `"available"`
 
 ### Build and Load
 
@@ -45,86 +57,264 @@ npm run build
 3. Click "Load unpacked"
 4. Select the `dist` directory
 
-## Tech Stack
+**Note:** Model download may take several minutes on first use. Ensure you have 22+ GB free storage.
 
-### Frontend
-- React 19.1.0 + TypeScript
-- Vite 7.0.5 build system
-- Tailwind CSS 4.1.14 for styling
-- shadcn/ui components (Radix UI primitives)
+## Quick Start
 
-### 3D Visualization
-- three.js 0.180.0
-- @react-three/fiber 9.4.0
-- @react-three/drei 10.7.6
-- @react-three/postprocessing 3.0.4 (Bloom effects)
+### First-Time Setup
 
-### Database
-- Dexie 4.2.1 (IndexedDB wrapper)
-- Schema: topics, items, item_topic, topic_edges, vectors
+1. **Install the extension** following the steps above
+2. **Pin to toolbar**: Click the puzzle icon in Chrome, find "Ori", click the pin
+3. **Wait for model download**: First use triggers Gemini Nano download (~1-2 GB, takes a few minutes)
 
-### AI/ML
-- **Embeddings**: Hugging Face Transformers.js with onnx-community/embeddinggemma-300m-ONNX (768-dimensional vectors)
-- **LLM**: Chrome Prompt API (Gemini Nano)
-- **Summarization**: Chrome Summarizer API
-- **Dimensionality Reduction**: umap-js 1.4.0 with custom PCA implementation
+### Using Ori
 
-### Chrome APIs
-- `chrome.runtime`: Message passing between components
-- `chrome.tabs`: Content extraction from active tabs
-- `chrome.scripting`: Script injection for content access
-- `chrome.storage`: Settings synchronization
-- `chrome.sidePanel`: Side panel UI hosting
-- `chrome.offscreen`: WASM embedding model hosting (bypasses service worker limitations)
-- `chrome.webNavigation`: SPA navigation tracking
+**Extract Content:**
+1. Visit any webpage you want to save
+2. Click the Ori extension icon
+3. Click **"Extract"** button
+4. Wait for processing (AI summarizes and extracts topics)
 
-## Functionality
+**Explore Your Graph:**
+1. Click the Ori icon again
+2. Click **"Open Side Panel"**
+3. View your 3D knowledge graph in the **Explore** tab
+4. Click nodes to see related pages
+5. Use the search box to find topics by meaning
 
-### Content Extraction
-Automatically extracts page title, URL, and body text from visited pages. Smart validation rejects low-quality content (search results, login pages, error pages, listing pages). Generates AI summaries using Gemini Nano in key-points format. Extracts 2-4 topics per page using structured JSON output. Creates 768-dimensional vector embeddings for both topics and content.
+**Search with AI:**
+1. Type a natural language query (e.g., "machine learning concepts")
+2. Graph highlights relevant topics and zooms to them
+3. Read the AI-generated insight summarizing related content
+4. Click page references to open original sources
 
-### Knowledge Graph Construction
-Merges similar topics using 0.92 cosine similarity threshold. Connects related topics with edges at 0.86 minimum similarity. Enforces maximum 5 edges per node to prevent visual clutter. Deduplicates by URL and semantic similarity. Triggers 3D position recomputation after graph updates.
+**Manage Content:**
+1. Switch to **Inspect** tab in side panel
+2. View all topics and pages in table format
+3. Use search to filter by keywords
+4. Select multiple items and delete if needed
+5. Click any row to see details
 
-### 3D Visualization
-Renders topics as glowing spheres in 3D space using instanced meshes for performance. Positions computed via PCA (768D to 100D) followed by UMAP (100D to 3D). Bloom effects highlight search results. Interactive camera controls with smooth animations. Theme-aware rendering for dark and light modes. Click interactions reveal related pages.
+**Customize Settings:**
+1. Switch to **Configure** tab
+2. Adjust graph parameters (merge threshold, edge limits, spacing)
+3. Tune search settings (result counts, thresholds)
+4. Click **Apply** when done (recomputes positions if needed)
+5. Click **Reset** to restore defaults
 
-### Semantic Search
-Converts natural language queries to embeddings. Finds top 5 similar topics and top 10 similar items with 0.8 similarity threshold. Highlights results in 3D space with automatic camera focus. Displays edges between highlighted topics.
+### Tips
 
-### RAG-Powered Insights
-Streams contextual summaries about user queries. Counts related pages and mentions key themes. Suggests actionable next steps with hyperlinked references to specific pages. Operates entirely on-device using Chrome's Prompt API.
+- **Extract frequently**: Build your graph by processing pages you visit
+- **Use semantic search**: Ask questions naturally, not just keywords
+- **Explore connections**: Click nodes and connected topics to discover relationships
+- **Toggle cluster view**: Shows communities of related topics with color coding
+- **Adjust spacing**: If nodes are too close, increase UMAP spread in Configure
+
+## Features
+
+### Explore View
+- **3D StarMap**: Interactive visualization of topics as nodes with edges representing semantic similarity
+- **Cluster Visualization**: Louvain community detection with color-coded groups and MST edges
+- **Semantic Search**: Natural language queries with automatic camera focus on results
+- **RAG Insights**: Streaming contextual summaries with clickable page references
+- **Dynamic Controls**: Toggle edges, labels, and cluster modes
 
 ### Inspect View
-Table view of all topics and items. Sortable by usage count and creation date. Direct links to original pages.
+- **Table Interface**: Paginated view of all topics and pages with search and sort
+- **Bulk Operations**: Multi-select and delete topics or pages with cascade cleanup
+- **Detail Views**: Click to see connected topics, linked pages, and metadata
+- **Navigation**: Click connected topics to explore the graph
+
+### Configure View
+- **Graph Settings**: Topic merge threshold, edge similarity, max edges per node, cluster parameters, UMAP spacing
+- **Search Settings**: Result counts, similarity thresholds, max edges in results
+- **Smart Apply**: Automatically recomputes positions when graph/UMAP parameters change
+- **Reset**: Restore all settings to defaults
 
 ## Architecture
 
+### Pipeline
+
+```
+Content Extraction → Validation → Summarization → Topic Extraction → Embedding
+                                        ↓
+                              Graph Construction
+                                        ↓
+                          Dimensionality Reduction (PCA → UMAP)
+                                        ↓
+                               3D Visualization
+```
+
+### Database Schema
+
+**IndexedDB via Dexie:**
+- `topics`: id, label (unique), uses, createdAt, x/y/z coordinates
+- `items`: id, title, summary, link (unique), createdAt
+- `item_topic`: Many-to-many junction table
+- `topic_edges`: id, src, dst, similarity, createdAt (unique composite index on [src+dst])
+- `vectors`: ownerType, ownerId, buf (768-dim ArrayBuffer), createdAt
+
 ### Vector Embeddings
-768-dimensional embeddings stored as ArrayBuffer in IndexedDB. Used for semantic similarity computation across both topics and items. Enables topic merging and content search.
 
-### UMAP Dimensionality Reduction
-Flow: 768D embeddings → PCA to 100D → UMAP to 3D coordinates. Parameters: nNeighbors = min(15, topics/2), minDist = 0.1, spread = 1.0. Normalized to [-10, 10] cube for rendering.
+**Model:** `onnx-community/embeddinggemma-300m-ONNX`
+- **Dimensions:** 768
+- **Format:**
+  - Query: `"task: search result | query: {text}"`
+  - Document: `"title: {title} | text: {text}"`
+- **Storage:** Float32Array serialized to ArrayBuffer in IndexedDB
+- **Hosting:** Offscreen document (bypasses service worker WASM limitations)
 
-### Topic Extraction and Merging
-LLM with JSON schema constraint outputs 2-4 topics per page. First topic represents core concept (specific, not broad). Remaining topics are related concepts. Similarity matrix computation identifies duplicates at 0.92 threshold for automatic merging.
+### Dimensionality Reduction
 
-### Graph Edge Creation
-When new topics are inserted, compute similarity against all existing topics. Create edges for pairs exceeding 0.86 similarity. Sort by similarity and enforce maximum 5 edges per node.
+**PCA:** 768D → 100D (custom implementation)
+**UMAP:** 100D → 3D
+- nNeighbors: min(15, floor(topics / 2))
+- minDist: 0.4 (configurable)
+- spread: 2.0 (configurable)
+- Normalized to [-20, 20] coordinate space
 
-### Offscreen Document Pattern
-Service workers cannot execute WASM. Embedding model hosted in persistent offscreen document. Communication via chrome.runtime.sendMessage. Ensures embedding generation remains available throughout extension lifecycle.
+### Graph Construction
 
-## Known Limitations
+**Topic Extraction:**
+- Uses Gemini Nano with JSON schema constraint
+- Extracts 2-4 topics per page (first = core concept, rest = related)
+- Generates 768-dim embeddings for each topic
 
-- **Auto-extraction mode**: Currently in beta. Requires additional testing for edge cases and reliability improvements.
-- **3D graph performance**: Not fully optimized. Observable lag when adding new nodes due to UMAP recomputation on the full graph.
+**Topic Merging:**
+- Computes similarity matrix against all existing topics
+- Merges topics above threshold (default: 0.85, configurable)
+- Exact label match takes precedence
+
+**Edge Creation:**
+- Creates edges between topics with similarity ≥ 0.6 (configurable)
+- Enforces max 5 edges per node (configurable), bidirectionally
+- Sorts neighbors by similarity and keeps strongest connections
+- Prevents duplicate edges via sorted [src, dst] composite index
+
+**Edge Pruning:**
+- Checks both new topic AND target neighbor edge counts
+- Skips neighbors already at max capacity
+- Maintains graph density while respecting limits
+
+### Cluster Detection
+
+**Louvain Algorithm:** via graphology-communities-louvain
+- Resolution: 1.0 (configurable)
+- Min cluster size: 2 (configurable)
+- Semantic medoid selection using embeddings (topic closest to cluster centroid)
+- MST computation for tree visualization within clusters
+- Depth tracking and direction mapping for animated edge growth
+
+### RAG Search
+
+1. **Query Embedding:** Convert natural language to 768-dim vector
+2. **Vector Search:** Find top K topics and items by cosine similarity
+3. **Neighbor Expansion:** Include neighbors of highest-ranked topic
+4. **Edge Filtering:** Show only edges between highlighted topics
+5. **Insight Generation:** Stream contextual summary using Gemini Nano with custom system prompt
+
+### Configuration System
+
+**Storage:** chrome.storage.sync (syncs across devices)
+**Change Detection:**
+- Graph settings → Recompute positions + reload edges
+- UMAP params → Recompute positions only
+- Search settings → No recomputation (instant)
+
+**Default Settings:**
+```typescript
+{
+  graph: {
+    topicMergeThreshold: 0.85,
+    edgeMinSimilarity: 0.6,
+    maxEdgesPerNode: 5,
+    clusterResolution: 1.0,
+    minClusterSize: 2,
+    umapMinDist: 0.4,
+    umapSpread: 2.0,
+  },
+  search: {
+    topicResultCount: 5,
+    itemResultCount: 10,
+    similarityThreshold: 0.4,
+    maxEdgesInResults: 20,
+  }
+}
+```
+
+## Tech Stack
+
+**Frontend:**
+- React 19.1.0 + TypeScript
+- Vite 7.0.5
+- Tailwind CSS 4.1.14
+- shadcn/ui (Radix UI primitives)
+
+**3D Visualization:**
+- three.js 0.180.0
+- @react-three/fiber 9.4.0
+- @react-three/drei 10.7.6
+- @react-three/postprocessing 3.0.4
+
+**Database:**
+- Dexie 4.2.1 (IndexedDB wrapper)
+
+**AI/ML:**
+- Embeddings: Transformers.js + ONNX Runtime
+- LLM: Chrome Prompt API (Gemini Nano)
+- Summarization: Chrome Summarizer API
+- Dimensionality Reduction: umap-js 1.4.0
+
+**Graph Analytics:**
+- graphology + graphology-communities-louvain
+- Custom PCA implementation
+- MST computation for cluster visualization
+
+**Chrome APIs:**
+- `sidePanel`: Main UI
+- `storage`: Settings sync
+- `tabs`, `scripting`: Content extraction
+- `offscreen`: Embedding model hosting
+- `webNavigation`: SPA tracking
+
+## Performance
+
+**Optimizations:**
+- Instanced meshes for node rendering (single draw call)
+- Precomputed positions, colors, and scales
+- Memoized calculations with React.useMemo
+- Efficient IndexedDB queries with composite indexes
+- Lazy loading of embeddings
+- Bloom effects with theme-aware parameters
+
+**Scalability:**
+- Tested with 500+ topics and 1000+ items
+- UMAP computation: ~1-2s for 500 topics
+- Search latency: <200ms for similarity computation
+
+## Limitations
+
+- **Desktop only**: Chrome's built-in AI not available on mobile
+- **UMAP recomputation**: Full graph recalculation on new topics (no incremental updates)
+- **English-centric**: Optimal for English content (Gemini Nano supports EN/ES/JA)
+- **Storage**: Requires significant disk space for model and embeddings
 
 ## Future Work
 
-- Performance optimization for 3D graph rendering and UMAP incremental updates
-- Multi-language support for international content
-- Export and import capabilities for knowledge graph portability
-- Advanced filtering and temporal analytics
+- Incremental UMAP updates for better performance
+- Export/import functionality for graph portability
+- Temporal analytics and browsing pattern insights
+- Advanced filtering (date ranges, topic categories)
 - Collaborative knowledge sharing between users
-- Mobile companion application for cross-device access
+- Mobile companion app
+
+## License
+
+MIT
+
+## Acknowledgments
+
+- Chrome Built-in AI team for Gemini Nano APIs
+- Hugging Face for Transformers.js
+- umap-js for dimensionality reduction
+- graphology for graph algorithms

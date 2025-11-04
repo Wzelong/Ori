@@ -1,5 +1,6 @@
 import { UMAP } from 'umap-js';
 import { mean, subtract, covarianceMatrix, eigenDecomposition, normalize3D } from './vectorUtils';
+import { getSettings } from './settings';
 
 interface PCAResult {
   components: number[][];
@@ -26,7 +27,12 @@ export function projectPCA(vector: number[], pcaResult: PCAResult): number[] {
   );
 }
 
-export function umap(vectors: number[][], nComponents: number = 3): number[][] {
+export function umap(
+  vectors: number[][],
+  nComponents: number = 3,
+  minDist: number = 0.4,
+  spread: number = 2.0
+): number[][] {
   if (vectors.length === 0) {
     return [];
   }
@@ -34,8 +40,8 @@ export function umap(vectors: number[][], nComponents: number = 3): number[][] {
   const umap = new UMAP({
     nComponents,
     nNeighbors: Math.min(15, Math.floor(vectors.length / 2)),
-    minDist: 0.1,
-    spread: 1.0
+    minDist,
+    spread
   });
 
   return umap.fit(vectors);
@@ -50,10 +56,17 @@ export async function computeTopicPositions(embeddings: number[][]): Promise<num
     return embeddings.map((_, i) => [i * 5, 0, 0]);
   }
 
+  const settings = await getSettings();
+
   const pcaResult = pca(embeddings, 100);
   const reduced = embeddings.map(emb => projectPCA(emb, pcaResult));
 
-  const positions3D = umap(reduced, 3);
+  const positions3D = umap(
+    reduced,
+    3,
+    settings.graph.umapMinDist,
+    settings.graph.umapSpread
+  );
 
   return normalize3D(positions3D);
 }

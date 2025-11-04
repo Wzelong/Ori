@@ -2,6 +2,7 @@ import { db } from '../db/database';
 import { loadVector } from '../llm/embeddings';
 import type { Item, TopicWithPosition } from '../types/schema';
 import { cosineSimilarity } from './vectorUtils';
+import { getSettings } from './settings';
 
 export interface TopicSearchResult {
   topic: TopicWithPosition;
@@ -15,9 +16,13 @@ export interface ItemSearchResult {
 
 export async function findSimilarTopics(
   queryEmbedding: number[],
-  topK: number = 5,
-  threshold: number = 0.5
+  topK?: number,
+  threshold?: number
 ): Promise<TopicSearchResult[]> {
+  const settings = await getSettings();
+  const actualTopK = topK ?? settings.search.topicResultCount;
+  const actualThreshold = threshold ?? settings.search.similarityThreshold;
+
   const topics = await db.topics.toArray();
 
   const results: TopicSearchResult[] = [];
@@ -32,7 +37,7 @@ export async function findSimilarTopics(
 
     const similarity = cosineSimilarity(queryEmbedding, embedding);
 
-    if (similarity >= threshold) {
+    if (similarity >= actualThreshold) {
       results.push({
         topic: topic as TopicWithPosition,
         similarity
@@ -42,14 +47,18 @@ export async function findSimilarTopics(
 
   results.sort((a, b) => b.similarity - a.similarity);
 
-  return results.slice(0, topK);
+  return results.slice(0, actualTopK);
 }
 
 export async function findSimilarItems(
   queryEmbedding: number[],
-  topK: number = 10,
-  threshold: number = 0.5
+  topK?: number,
+  threshold?: number
 ): Promise<ItemSearchResult[]> {
+  const settings = await getSettings();
+  const actualTopK = topK ?? settings.search.itemResultCount;
+  const actualThreshold = threshold ?? settings.search.similarityThreshold;
+
   const items = await db.items.toArray();
 
   const results: ItemSearchResult[] = [];
@@ -60,7 +69,7 @@ export async function findSimilarItems(
 
     const similarity = cosineSimilarity(queryEmbedding, embedding);
 
-    if (similarity >= threshold) {
+    if (similarity >= actualThreshold) {
       results.push({
         item,
         similarity
@@ -70,5 +79,5 @@ export async function findSimilarItems(
 
   results.sort((a, b) => b.similarity - a.similarity);
 
-  return results.slice(0, topK);
+  return results.slice(0, actualTopK);
 }

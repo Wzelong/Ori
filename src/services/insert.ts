@@ -4,10 +4,7 @@ import { computeSimilarityFromOffscreen } from '../llm/offscreenClient';
 import type { PageResult, Topic, Item, TopicEdge } from '../types/schema';
 import { Tensor } from '@huggingface/transformers';
 import { recomputeAllTopicPositions } from './positions';
-
-const TOPIC_MERGE_THRESHOLD = 0.85;
-const EDGE_MIN_SIMILARITY = 0.6;
-const MAX_EDGES_PER_NODE = 5;
+import { getSettings } from './settings';
 
 type EdgeData = Omit<TopicEdge, 'id' | 'createdAt'>;
 type Neighbor = { topic: Topic; similarity: number };
@@ -36,7 +33,8 @@ function findBestMatch(similarities: number[]): { index: number; similarity: num
 function resolveTopics(
   topics: string[],
   existingTopics: Topic[],
-  similarityMatrix: number[][]
+  similarityMatrix: number[][],
+  mergeThreshold: number
 ): { resolved: Topic[]; newIndices: Map<string, number> } {
   const resolved: Topic[] = [];
   const newIndices = new Map<string, number>();
@@ -51,7 +49,7 @@ function resolveTopics(
     const newTopicSimilarities = similarityMatrix[i].slice(0, i);
     const bestNewMatch = findBestMatch(newTopicSimilarities);
 
-    if (bestNewMatch.index >= 0 && bestNewMatch.similarity > TOPIC_MERGE_THRESHOLD) {
+    if (bestNewMatch.index >= 0 && bestNewMatch.similarity > mergeThreshold) {
       const existingResolved = resolved[bestNewMatch.index];
       resolved.push({ ...existingResolved, uses: existingResolved.uses + 1 });
       return;
@@ -68,7 +66,7 @@ function resolveTopics(
     const best = findBestMatch(similarities);
 
 
-    if (best.index >= 0 && best.similarity > TOPIC_MERGE_THRESHOLD) {
+    if (best.index >= 0 && best.similarity > mergeThreshold) {
       const match = existingTopics[best.index];
       resolved.push({ ...match, uses: match.uses + 1 });
     } else {
@@ -108,9 +106,15 @@ function getNeighbors(matrixRow: number, ctx: GraphContext): Neighbor[] {
   return neighbors.sort((a, b) => b.similarity - a.similarity);
 }
 
-function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContext): EdgeData[] {
+function computeEdges(
+  newTopic: Topic,
+  matrixRow: number,
+  ctx: GraphContext,
+  edgeMinSimilarity: number,
+  maxEdgesPerNode: number
+): EdgeData[] {
   const neighbors = getNeighbors(matrixRow, ctx);
-  const candidates = neighbors.filter(n => n.similarity >= EDGE_MIN_SIMILARITY);
+  const candidates = neighbors.filter(n => n.similarity >= edgeMinSimilarity);
 
   const connectedNodes = new Set<string>();
   ctx.allEdges.forEach(edge => {
@@ -118,16 +122,26 @@ function computeEdges(newTopic: Topic, matrixRow: number, ctx: GraphContext): Ed
     if (edge.dst === newTopic.id) connectedNodes.add(edge.src);
   });
 
+  const neighborEdgeCounts = new Map<string, number>();
+  ctx.allEdges.forEach(edge => {
+    neighborEdgeCounts.set(edge.src, (neighborEdgeCounts.get(edge.src) || 0) + 1);
+    neighborEdgeCounts.set(edge.dst, (neighborEdgeCounts.get(edge.dst) || 0) + 1);
+  });
+
   const edges: EdgeData[] = [];
   let edgeCount = 0;
 
   for (const neighbor of candidates) {
-    if (edgeCount >= MAX_EDGES_PER_NODE) break;
+    if (edgeCount >= maxEdgesPerNode) break;
     if (connectedNodes.has(neighbor.topic.id)) continue;
+
+    const neighborCurrentEdges = neighborEdgeCounts.get(neighbor.topic.id) || 0;
+    if (neighborCurrentEdges >= maxEdgesPerNode) continue;
 
     const [src, dst] = [newTopic.id, neighbor.topic.id].sort();
     edges.push({ src, dst, similarity: neighbor.similarity });
     connectedNodes.add(neighbor.topic.id);
+    neighborEdgeCounts.set(neighbor.topic.id, neighborCurrentEdges + 1);
     edgeCount++;
   }
 
@@ -139,6 +153,8 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
     if (await db.items.where('link').equals(pageResult.link).first()) {
       return null;
     }
+
+    const settings = await getSettings();
 
     const newEmbeddings = pageResult.topicEmbeddings || [];
     const existingTopics = await db.topics.toArray();
@@ -153,7 +169,12 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
       ])
     );
 
-    const { resolved, newIndices } = resolveTopics(pageResult.topics, existingTopics, matrix);
+    const { resolved, newIndices } = resolveTopics(
+      pageResult.topics,
+      existingTopics,
+      matrix,
+      settings.graph.topicMergeThreshold
+    );
 
     const ctx: GraphContext = {
       existingTopics,
@@ -172,7 +193,13 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
     for (const topic of newTopics) {
       const row = newIndices.get(topic.id);
       if (row !== undefined) {
-        const edges = computeEdges(topic, row, ctx);
+        const edges = computeEdges(
+          topic,
+          row,
+          ctx,
+          settings.graph.edgeMinSimilarity,
+          settings.graph.maxEdgesPerNode
+        );
         ctx.allEdges.push(...edges);
         ctx.createdTopics.push({ topic, row });
       }

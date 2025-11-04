@@ -481,7 +481,7 @@ function Labels({ topics, isDark, centerNodeId, edges, animationKey, cameraPosit
       topicsWithScore.sort((a, b) => a.score - b.score);
 
       const maxDistance = 30;
-      const maxLabels = 5 + centroids.length;
+      const maxLabels = 3 + centroids.length;
 
       return topicsWithScore
         .filter(item => item.score !== Infinity && (centroidSet.has(item.topic.id) || (item.distance !== undefined && item.distance < maxDistance)))
@@ -600,8 +600,8 @@ function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
     >
       <div style={{
         color: textColor,
-        fontSize: '12px',
-        fontWeight: 500,
+        fontSize: '10px',
+        fontWeight: 400,
         whiteSpace: 'nowrap',
         textShadow: isDark
           ? '0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)'
@@ -658,8 +658,8 @@ function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) 
     >
       <div style={{
         color: textColor,
-        fontSize: '12px',
-        fontWeight: 500,
+        fontSize: '10px',
+        fontWeight: 400,
         whiteSpace: 'nowrap',
         textShadow: isDark
           ? '0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)'

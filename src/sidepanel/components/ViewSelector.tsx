@@ -1,11 +1,11 @@
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Telescope, Microscope } from 'lucide-react'
+import { Telescope, Microscope, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ViewSelectorProps {
-  value: 'explore' | 'inspect'
-  onValueChange: (value: 'explore' | 'inspect') => void
+  value: 'explore' | 'inspect' | 'configure'
+  onValueChange: (value: 'explore' | 'inspect' | 'configure') => void
 }
 
 export function ViewSelector({ value, onValueChange }: ViewSelectorProps) {
@@ -39,7 +39,7 @@ export function ViewSelector({ value, onValueChange }: ViewSelectorProps) {
               size="sm"
               onClick={() => onValueChange('inspect')}
               className={cn(
-                'h-8 w-8 p-0 rounded-l-none cursor-pointer',
+                'h-8 w-8 p-0 rounded-none border-r cursor-pointer',
                 value === 'inspect' && 'bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground'
               )}
               aria-label="Inspect view"
@@ -49,6 +49,26 @@ export function ViewSelector({ value, onValueChange }: ViewSelectorProps) {
           </TooltipTrigger>
           <TooltipContent>
             <p>Inspect</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onValueChange('configure')}
+              className={cn(
+                'h-8 w-8 p-0 rounded-l-none cursor-pointer',
+                value === 'configure' && 'bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground'
+              )}
+              aria-label="Configure view"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Configure</p>
           </TooltipContent>
         </Tooltip>
       </div>
