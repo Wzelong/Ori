@@ -136,13 +136,13 @@ npm run build
 ### Pipeline
 
 ```
-Content Extraction → Validation → Summarization → Topic Extraction → Embedding
-                                        ↓
-                              Graph Construction
-                                        ↓
-                          Dimensionality Reduction (PCA → UMAP)
-                                        ↓
-                               3D Visualization
+Content Extraction → Validation → Extraction → Embedding
+                                                    ↓
+                                            Graph Construction
+                                                    ↓
+                                    Dimensionality Reduction (PCA → UMAP)
+                                                    ↓
+                                              3D Visualization
 ```
 
 ### Database Schema
