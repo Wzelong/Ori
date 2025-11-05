@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     edgeMinSimilarity: 0.6,
     maxEdgesPerNode: 5,
     clusterResolution: 1.0,
-    minClusterSize: 2,
+    minClusterSize: 3,
     umapMinDist: 0.4,
     umapSpread: 2.0,
   },

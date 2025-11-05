@@ -4,16 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ori</title>
-    <script>
-      // Prevent theme flash by applying dark class immediately
-      (function() {
-        const theme = localStorage.getItem('ori-theme') || 'system';
-        const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        if (isDark) {
-          document.documentElement.classList.add('dark');
-        }
-      })();
-    </script>
+    <script type="module" src="../theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

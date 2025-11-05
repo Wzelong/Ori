@@ -12,6 +12,9 @@ dist
 release
 dist-ssr
 *.local
+*.crx
+*.pem
+.claude
 
 # Editor directories and files
 .vscode/*

@@ -32,6 +32,7 @@ export default function App() {
   const [showingAllLabels, setShowingAllLabels] = useState(false)
   const [showingClusters, setShowingClusters] = useState(false)
   const [clusterCount, setClusterCount] = useState(0)
+  const [flashMessage, setFlashMessage] = useState<{ type: 'success' | 'error', message: string } | null>(null)
 
   useEffect(() => {
     const loadTopics = async () => {
@@ -164,6 +165,23 @@ export default function App() {
     }
   }
 
+  const showFlash = (type: 'success' | 'error', message: string) => {
+    setFlashMessage({ type, message })
+  }
+
+  useEffect(() => {
+    if (flashMessage) {
+      const timer = setTimeout(() => {
+        setFlashMessage(null)
+      }, 3000)
+      return () => clearTimeout(timer)
+    }
+  }, [flashMessage])
+
+  const displayStatus = flashMessage
+    ? { type: flashMessage.type, message: flashMessage.message }
+    : extraction.status
+
   return (
     <div className="flex flex-col h-screen bg-background">
       <header className="flex items-center justify-between px-4 py-2.5 border-b">
@@ -176,7 +194,7 @@ export default function App() {
       </header>
 
       <StatsBar
-        status={extraction.status}
+        status={displayStatus}
         onEdgeClick={handleToggleEdges}
         showingEdges={showingAllEdges}
         onTopicClick={handleToggleLabels}
@@ -234,7 +252,7 @@ export default function App() {
         ) : view === 'inspect' ? (
           <InspectView />
         ) : (
-          <ConfigureView />
+          <ConfigureView onFlash={showFlash} />
         )}
       </div>
     </div>

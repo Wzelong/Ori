@@ -39,6 +39,7 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
   const [hovered, setHovered] = useState(false);
   const pointerDownTimeRef = useRef<number>(0);
 
+
   useEffect(() => {
     if (clickable) {
       document.body.style.cursor = hovered ? 'pointer' : 'default';
@@ -107,10 +108,13 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
     if (meshRef.current.material) {
       (meshRef.current.material as THREE.Material).needsUpdate = true;
     }
-  }, [positions, scales, colors, count, tempObj, tempColor, isDark]);
+
+    meshRef.current.computeBoundingSphere();
+    meshRef.current.computeBoundingBox();
+  }, [positions, scales, colors, count, tempObj, tempColor, isDark, clickable, opacity]);
 
 
-  const handlePointerDown = () => {
+  const handlePointerDown = (event: any) => {
     if (clickable) {
       pointerDownTimeRef.current = Date.now();
     }
@@ -129,34 +133,46 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
     }
   };
 
+  const handlePointerOver = (event: any) => {
+    if (clickable) {
+      setHovered(true);
+    }
+  };
+
+  const handlePointerOut = () => {
+    if (clickable) {
+      setHovered(false);
+    }
+  };
+
   if (count === 0) return null;
 
   return (
     <instancedMesh
       ref={meshRef}
       args={[undefined, undefined, count]}
+      frustumCulled={false}
+      renderOrder={0}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
-      onPointerOver={() => clickable && setHovered(true)}
-      onPointerOut={() => clickable && setHovered(false)}
+      onPointerOver={handlePointerOver}
+      onPointerOut={handlePointerOut}
       onClick={(e) => e.stopPropagation()}
     >
-      <sphereGeometry args={[1, 16, 16]} />
+      <sphereGeometry args={[1.5, 16, 16]} />
       {isDark ? (
         <meshStandardMaterial
-          key={materialKey}
           vertexColors
           emissive="#ffffff"
           emissiveIntensity={2.0}
           toneMapped={false}
-          transparent={opacity < 1}
+          transparent={true}
           opacity={opacity}
         />
       ) : (
         <meshBasicMaterial
-          key={materialKey}
           color="#ffffff"
-          transparent={opacity < 1}
+          transparent={true}
           opacity={opacity}
         />
       )}
@@ -184,6 +200,7 @@ interface EdgeAnimationData {
   progress: number;
   point1: THREE.Vector3;
   point2: THREE.Vector3;
+  isClusterEdge: boolean;
 }
 
 interface AnimatedEdgesProps {
@@ -194,6 +211,7 @@ interface AnimatedEdgesProps {
     opacity: number;
     delay: number;
     reversed: boolean;
+    isClusterEdge: boolean;
   }>;
 }
 
@@ -215,6 +233,7 @@ function AnimatedEdges({ lines }: AnimatedEdgesProps) {
       if (animationDataRef.current[i]) {
         animationDataRef.current[i].color = line.color;
         animationDataRef.current[i].opacity = line.opacity;
+        animationDataRef.current[i].isClusterEdge = line.isClusterEdge;
       }
     });
   }
@@ -265,8 +284,8 @@ function AnimatedEdges({ lines }: AnimatedEdgesProps) {
             points={[data.point1, data.point2]}
             color={data.color}
             lineWidth={2}
-            transparent
-            opacity={data.opacity * data.progress}
+            transparent={!data.isClusterEdge}
+            opacity={data.isClusterEdge ? data.progress : data.opacity * data.progress}
           />
         );
       })}
@@ -381,6 +400,7 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, clustersWi
   const animatedLines = useMemo(() => {
     return lines.map(line => {
       const edgeColor = getEdgeColor(line.srcId, line.dstId);
+      const isClusterEdge = edgeColor !== defaultEdgeColor;
 
       const baseOpacity = Math.max(0.2, (line.similarity - 0.82) * 5);
       const darkOpacity = Math.min(0.8, baseOpacity);
@@ -397,13 +417,14 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, clustersWi
         color: edgeColor,
         opacity,
         delay,
-        reversed: line.reversed
+        reversed: line.reversed,
+        isClusterEdge
       };
     });
-  }, [lines, centerNodeId, isDark, clustersWithEdges]);
+  }, [lines, centerNodeId, isDark, clustersWithEdges, defaultEdgeColor]);
 
   return (
-    <group key={animationKey}>
+    <group key={animationKey} raycast={() => {}}>
       <AnimatedEdges lines={animatedLines} />
     </group>
   );
@@ -600,8 +621,8 @@ function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
     >
       <div style={{
         color: textColor,
-        fontSize: '10px',
-        fontWeight: 400,
+        fontSize: '11px',
+        fontWeight: 700,
         whiteSpace: 'nowrap',
         textShadow: isDark
           ? '0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)'
@@ -658,8 +679,8 @@ function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) 
     >
       <div style={{
         color: textColor,
-        fontSize: '10px',
-        fontWeight: 400,
+        fontSize: '11px',
+        fontWeight: 700,
         whiteSpace: 'nowrap',
         textShadow: isDark
           ? '0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)'
@@ -721,7 +742,7 @@ function CameraAnimation({ highlightedTopics, allTopics, onCameraUpdate }: Camer
 
     const distance = topics.length === 1
       ? 15
-      : span * 1.8;
+      : span * 1.5;
 
     return { center, distance };
   }, []);
@@ -1093,7 +1114,7 @@ export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAl
 
   useEffect(() => {
     db.topic_edges.toArray().then(setAllEdges);
-  }, []);
+  }, [topicsKey]);
 
   useEffect(() => {
     if (onClusterCountChange) {
@@ -1115,6 +1136,7 @@ export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAl
       style={{ opacity: isReady ? 1 : 0 }}
     >
       <Canvas
+        camera={{ near: 0.01, far: 1000 }}
         gl={{
           antialias: true,
           toneMapping: isDark ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping,
@@ -1138,7 +1160,7 @@ export function StarMap({ topics, highlightedTopics, edges, onTopicClick, showAl
             kernelSize={isDark ? 4 : 5}
             luminanceThreshold={isDark ? 0.5 : 0.8}
             luminanceSmoothing={0.4}
-            intensity={isDark ? 0.6 : 0.8}
+            intensity={isDark ? 0.6 : 0.0}
             radius={isDark ? 0.4 : 0.6}
           />
         </EffectComposer>

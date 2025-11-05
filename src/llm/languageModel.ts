@@ -19,6 +19,7 @@ export async function generateText(
     initialPrompts,
     temperature: 0.5,
     topK: 1,
+    outputLanguage: "en"
   });
 
   const promptOptions = options?.schema
@@ -48,6 +49,7 @@ export async function generateTextStreaming(
     initialPrompts,
     temperature: 0.5,
     topK: 1,
+    outputLanguage: "en"
   });
 
   return session.promptStreaming(userPrompt);

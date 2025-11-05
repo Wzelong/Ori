@@ -3,7 +3,7 @@ import { runPipeline } from '@/services/pipeline'
 import { warmupModel } from '@/llm/offscreenClient'
 
 export type StatusState = {
-  type: 'ready' | 'error' | 'loading' | 'skipped'
+  type: 'ready' | 'error' | 'loading' | 'skipped' | 'success'
   message: string
 }
 

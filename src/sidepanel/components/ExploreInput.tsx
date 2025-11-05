@@ -31,7 +31,11 @@ export function ExploreInput({ onSearch, onInputChange, isSearching = false, has
 
   useEffect(() => {
     if (textareaRef.current) {
-      resize(textareaRef.current)
+      const textarea = textareaRef.current
+      textarea.style.height = 'auto'
+      requestAnimationFrame(() => {
+        resize(textarea)
+      })
     }
   }, [])
 
@@ -68,6 +72,7 @@ export function ExploreInput({ onSearch, onInputChange, isSearching = false, has
       <textarea
         ref={textareaRef}
         className="p-2 flex-1 max-h-[100px] resize-none border-none focus:outline-none bg-transparent placeholder:text-muted-foreground/60 text-[14px] leading-[20px] overflow-hidden"
+        style={{ height: 'auto', minHeight: '20px' }}
         rows={1}
         value={input}
         placeholder="Explore the stars..."

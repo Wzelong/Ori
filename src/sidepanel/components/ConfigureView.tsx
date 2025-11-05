@@ -6,12 +6,16 @@ import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { getSettings, saveSettings, resetSettings, detectChanges, DEFAULT_SETTINGS } from '@/services/settings'
+import { getSettings, saveSettings, detectChanges, DEFAULT_SETTINGS } from '@/services/settings'
 import { recomputeAllTopicPositions } from '@/services/positions'
 import type { AppSettings } from '@/services/settings'
 import { Info } from 'lucide-react'
 
-export function ConfigureView() {
+interface ConfigureViewProps {
+  onFlash: (type: 'success' | 'error', message: string) => void
+}
+
+export function ConfigureView({ onFlash }: ConfigureViewProps) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [originalSettings, setOriginalSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [isLoading, setIsLoading] = useState(true)
@@ -35,9 +39,8 @@ export function ConfigureView() {
     setIsLoading(false)
   }
 
-  const handleReset = async () => {
-    await resetSettings()
-    await loadSettings()
+  const handleReset = () => {
+    setSettings(DEFAULT_SETTINGS)
   }
 
   const handleApply = async () => {
@@ -53,8 +56,11 @@ export function ConfigureView() {
 
       setOriginalSettings(settings)
       setHasChanges(false)
+      onFlash('success', 'Settings applied successfully')
     } catch (error) {
       console.error('[ConfigureView] Failed to apply settings:', error)
+      const errorMsg = error instanceof Error ? error.message : 'Failed to apply settings'
+      onFlash('error', errorMsg)
     } finally {
       setIsApplying(false)
     }

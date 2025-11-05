@@ -105,12 +105,14 @@ export async function identifyClusters(
 
 function generateClusterColors(count: number): string[] {
   const predefinedColors = [
-    'hsl(0, 70%, 60%)',
-    'hsl(210, 70%, 60%)',
-    'hsl(120, 70%, 50%)',
-    'hsl(45, 70%, 60%)',
-    'hsl(280, 70%, 60%)',
-    'hsl(30, 70%, 60%)',
+    '#ef4444',
+    '#3b82f6',
+    '#10b981',
+    '#f59e0b',
+    '#8b5cf6',
+    '#ec4899',
+    '#06b6d4',
+    '#f97316',
   ];
 
   if (count <= predefinedColors.length) {
@@ -118,7 +120,7 @@ function generateClusterColors(count: number): string[] {
   }
 
   return Array.from({ length: count }, (_, i) => {
-    const hue = (i * 360) / count;
+    const hue = (i * 137.5) % 360;
     return `hsl(${hue}, 70%, 60%)`;
   });
 }

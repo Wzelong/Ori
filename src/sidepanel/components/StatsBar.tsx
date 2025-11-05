@@ -49,6 +49,7 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
     if (status.type === 'error') return 'bg-red-500'
     if (status.type === 'loading') return 'bg-yellow-500 animate-pulse'
     if (status.type === 'skipped') return 'bg-gray-400'
+    if (status.type === 'success') return 'bg-green-500'
     return 'bg-green-500'
   }
 

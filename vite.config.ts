@@ -52,6 +52,13 @@ export default defineConfig({
     copyWasmPlugin(),
     zip({ outDir: 'release', outFileName: `crx-${name}-${version}.zip` }),
   ],
+  build: {
+    rollupOptions: {
+      input: {
+        offscreen: path.resolve(__dirname, 'src/offscreen/offscreen.html'),
+      },
+    },
+  },
   server: {
     cors: {
       origin: [
