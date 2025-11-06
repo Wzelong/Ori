@@ -14,16 +14,18 @@ Ori automatically constructs a living knowledge graph from your browsing activit
 - **RAG-powered insights**: Conversational interface over your browsing history
 - **Configurable parameters**: Fine-tune graph behavior via settings UI
 
-<div align="center">
-  <div style="display: inline-block; margin: 0 10px;">
-    <h3>Semantic Search</h3>
-    <img src=".github/Search.gif" width="100%" alt="Search and Exploration">
-  </div>
-  <div style="display: inline-block; margin: 0 10px;">
-    <h3>Graph Clusters</h3>
-    <img src=".github/Edges&Clusters.gif" width="100%" alt="Edges and Clusters">
-  </div>
-</div>
+<table>
+<tr>
+<td width="50%">
+<h3 align="center">Semantic Search</h3>
+<img src=".github/Search.gif" alt="Search and Exploration">
+</td>
+<td width="50%">
+<h3 align="center">Graph Clusters</h3>
+<img src=".github/Edges&Clusters.gif" alt="Edges and Clusters">
+</td>
+</tr>
+</table>
 
 ## Installation
 
