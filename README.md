@@ -17,22 +17,9 @@ Ori automatically constructs a living knowledge graph from your browsing activit
 
 ## Demo
 
-<div align="center">
-  <table style="border: none;">
-    <tr>
-      <td align="center" style="border: none;">
-        <img src=".github/Search.gif" alt="Semantic Search" width="100%" />
-        <br />
-        Semantic Search
-      </td>
-      <td align="center" style="border: none;">
-        <img src=".github/Edges&Clusters.gif" alt="Graph Edges & Clusters" width="100%" />
-        <br />
-        Graph Edges & Clusters
-      </td>
-    </tr>
-  </table>
-</div>
+| Semantic Search | Graph Edges & Clusters |
+|:---:|:---:|
+| ![Semantic Search](.github/Search.gif) | ![Graph Edges & Clusters](.github/Edges&Clusters.gif) |
 
 ## Installation
 
