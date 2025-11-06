@@ -6,6 +6,8 @@ A Chrome extension that transforms browsing history into an interactive 3D seman
 
 Ori automatically constructs a living knowledge graph from your browsing activity. It extracts content, generates embeddings, discovers semantic relationships, and visualizes connections in 3D space—all while operating entirely offline with Chrome's built-in AI.
 
+![Search and Exploration](.github/Search.gif)
+
 **Key Features:**
 - **On-device AI**: Zero cloud dependencies using Chrome's Gemini Nano
 - **Automatic graph construction**: No manual tagging required
@@ -13,6 +15,8 @@ Ori automatically constructs a living knowledge graph from your browsing activit
 - **3D visualization**: Interactive StarMap with cluster detection
 - **RAG-powered insights**: Conversational interface over your browsing history
 - **Configurable parameters**: Fine-tune graph behavior via settings UI
+
+![Edges and Clusters](.github/Edges&Clusters.gif)
 
 ## Installation
 

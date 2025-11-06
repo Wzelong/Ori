@@ -27,7 +27,6 @@ interface StarsProps {
   colorFn: (topic: TopicWithPosition) => THREE.Color | number | string;
   scaleFn: (topic: TopicWithPosition) => number;
   isDark: boolean;
-  materialKey: string;
   opacity?: number;
   clickable?: boolean;
   onTopicClick?: (topic: TopicWithPosition) => void;
@@ -70,7 +69,7 @@ function Stars({ topics, colorFn, scaleFn, isDark, opacity = 1, clickable = fals
       scales[i] = s;
 
       const c = colorFn(t);
-      tempColor.set(c as any); // accepts number | string | Color
+      tempColor.set(c as any);
       colors[i * 3 + 0] = tempColor.r;
       colors[i * 3 + 1] = tempColor.g;
       colors[i * 3 + 2] = tempColor.b;
@@ -114,7 +113,8 @@ function Stars({ topics, colorFn, scaleFn, isDark, opacity = 1, clickable = fals
   }, [positions, scales, colors, count, tempObj, tempColor, isDark, clickable, opacity]);
 
 
-  const handlePointerDown = () => {
+  const handlePointerDown = (event: any) => {
+    console.log('[Stars] PointerDown:', { clickable, instanceId: event.instanceId });
     if (clickable) {
       pointerDownTimeRef.current = Date.now();
     }
@@ -127,8 +127,10 @@ function Stars({ topics, colorFn, scaleFn, isDark, opacity = 1, clickable = fals
     if (clickDuration > 200) return;
 
     const instanceId = event.instanceId;
+    console.log('[Stars] Click detected:', { instanceId, topicsLength: topics.length, event });
     if (instanceId !== undefined && instanceId < topics.length) {
       const clickedTopic = topics[instanceId];
+      console.log('[Stars] Clicked topic:', clickedTopic.label);
       onTopicClick(clickedTopic);
     }
   };
@@ -149,6 +151,7 @@ function Stars({ topics, colorFn, scaleFn, isDark, opacity = 1, clickable = fals
 
   return (
     <instancedMesh
+      key={`stars-${count}`}
       ref={meshRef}
       args={[undefined, undefined, count]}
       frustumCulled={false}
@@ -162,7 +165,6 @@ function Stars({ topics, colorFn, scaleFn, isDark, opacity = 1, clickable = fals
       <sphereGeometry args={[1.5, 16, 16]} />
       {isDark ? (
         <meshStandardMaterial
-          vertexColors
           emissive="#ffffff"
           emissiveIntensity={2.0}
           toneMapped={false}
@@ -171,7 +173,6 @@ function Stars({ topics, colorFn, scaleFn, isDark, opacity = 1, clickable = fals
         />
       ) : (
         <meshBasicMaterial
-          color="#ffffff"
           transparent={true}
           opacity={opacity}
         />
@@ -284,8 +285,8 @@ function AnimatedEdges({ lines }: AnimatedEdgesProps) {
             points={[data.point1, data.point2]}
             color={data.color}
             lineWidth={2}
-            transparent={!data.isClusterEdge}
-            opacity={data.isClusterEdge ? data.progress : data.opacity * data.progress}
+            transparent={true}
+            opacity={data.opacity * data.progress}
           />
         );
       })}
@@ -402,11 +403,16 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, clustersWi
       const edgeColor = getEdgeColor(line.srcId, line.dstId);
       const isClusterEdge = edgeColor !== defaultEdgeColor;
 
-      const baseOpacity = Math.max(0.2, (line.similarity - 0.82) * 5);
-      const darkOpacity = Math.min(0.8, baseOpacity);
-      const opacity = isDark ? darkOpacity : 0.8;
-      const animationDuration = 0.5;
+      let opacity: number;
+      if (isClusterEdge) {
+        opacity = 0.8;
+      } else {
+        const baseOpacity = Math.max(0.2, (line.similarity - 0.6) * 2.5);
+        const darkOpacity = Math.min(0.8, baseOpacity);
+        opacity = isDark ? darkOpacity : 0.8;
+      }
 
+      const animationDuration = 0.5;
       const delay = centerNodeId
         ? 1.0 + line.distance * (animationDuration + 0.05)
         : 0.5 + (line.distance * 0.01);
@@ -424,7 +430,7 @@ function Edges({ edges, topicMap, centerNodeId, isDark, animationKey, clustersWi
   }, [lines, centerNodeId, isDark, clustersWithEdges, defaultEdgeColor]);
 
   return (
-    <group key={animationKey} raycast={() => {}}>
+    <group key={animationKey} raycast={() => null}>
       <AnimatedEdges lines={animatedLines} />
     </group>
   );
@@ -902,23 +908,7 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
     return map;
   }, [topics]);
 
-  const materialKey = `${isDark ? 'dark' : 'light'}-${showClusters ? 'clustered' : 'normal'}`;
   const bgColor = isDark ? '#020617' : '#ffffff';
-
-  // Split into two meshes: highlighted vs normal
-  const { highlightedList, normalList } = useMemo(() => {
-    if (!highlightedTopics || highlightedTopics.length === 0) {
-      return { highlightedList: [], normalList: topics };
-    }
-
-    const highlightedList = highlightedTopics.map(r => r.topic);
-    const normalList = topics.filter(t => !highlightedIds.has(t.id));
-
-    return { highlightedList, normalList };
-  }, [topics, highlightedIds, highlightedTopics]);
-
-  // Color/scale functions
-  const highlightColor = useMemo(() => new THREE.Color('#0284c7'), []);
   const defaultColor = useMemo(() => new THREE.Color('#0284c7'), []);
   const orphanColor = useMemo(() => new THREE.Color(isDark ? '#404040' : '#707070'), [isDark]);
 
@@ -938,8 +928,7 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
     return map;
   }, [clustersWithEdges]);
 
-  const colorFnHighlighted = useCallback(() => highlightColor, [highlightColor]);
-  const colorFnNormal = useCallback((topic: TopicWithPosition) => {
+  const colorFn = useCallback((topic: TopicWithPosition) => {
     if (showClusters) {
       const clusterColor = topicColorMap.get(topic.id);
       return clusterColor || orphanColor;
@@ -947,23 +936,19 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
     return defaultColor;
   }, [showClusters, topicColorMap, defaultColor, orphanColor]);
 
-  const scaleFnHighlighted = useCallback((topic: TopicWithPosition) => {
-    const minScale = 0.12;
-    const maxScale = 0.25;
+  const calculateScale = useCallback((topic: TopicWithPosition, isHighlighted: boolean) => {
     const usesScale = Math.min(topic.uses / 20, 1);
-    return minScale + (maxScale - minScale) * usesScale;
-  }, []);
-
-  const scaleFnNormal = useCallback((topic: TopicWithPosition) => {
+    if (isHighlighted) {
+      return 0.12 + (0.25 - 0.12) * usesScale;
+    }
     const baseMin = isDark ? 0.06 : 0.08;
     const baseMax = isDark ? 0.15 : 0.18;
-    const usesScale = Math.min(topic.uses / 20, 1);
     return baseMin + (baseMax - baseMin) * usesScale;
   }, [isDark]);
 
-  const normalOpacity = highlightedList.length > 0
-    ? (isDark ? 0.2 : 0.6)
-    : 1.0;
+  const scaleFn = useCallback((topic: TopicWithPosition) => {
+    return calculateScale(topic, highlightedIds.has(topic.id));
+  }, [highlightedIds, calculateScale]);
 
   const centerNodeId = useMemo(() => {
     if (!highlightedTopics || highlightedTopics.length === 0) return null;
@@ -971,6 +956,11 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
       current.similarity > max.similarity ? current : max
     );
     return highest.topic.id;
+  }, [highlightedTopics]);
+
+  const highlightedList = useMemo(() => {
+    if (!highlightedTopics || highlightedTopics.length === 0) return [];
+    return highlightedTopics.map(r => r.topic);
   }, [highlightedTopics]);
 
   const edgeAnimationKey = useMemo(() => {
@@ -1000,6 +990,16 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
         />
       )}
 
+      <Stars
+        topics={highlightedList.length > 0 ? topics.filter(t => !highlightedIds.has(t.id)) : topics}
+        colorFn={colorFn}
+        scaleFn={scaleFn}
+        isDark={isDark}
+        opacity={highlightedList.length > 0 ? (isDark ? 0.2 : 0.6) : 1}
+        clickable={highlightedList.length === 0}
+        onTopicClick={onTopicClick}
+      />
+
       {highlightedList.length > 0 && edges && (
         <Labels
           topics={highlightedList}
@@ -1026,28 +1026,37 @@ function Scene({ topics, highlightedTopics, edges, isDark, onTopicClick, showAll
         />
       )}
 
-      <Stars
-        topics={normalList}
-        colorFn={colorFnNormal}
-        scaleFn={scaleFnNormal}
-        isDark={isDark}
-        materialKey={materialKey + '-normal'}
-        opacity={normalOpacity}
-        clickable={true}
-        onTopicClick={onTopicClick}
-      />
-
       {highlightedList.length > 0 && (
-        <Stars
-          topics={highlightedList}
-          colorFn={colorFnHighlighted}
-          scaleFn={scaleFnHighlighted}
-          isDark={isDark}
-          materialKey={materialKey + '-highlight'}
-          opacity={1}
-          clickable={true}
-          onTopicClick={onTopicClick}
-        />
+        <group key={highlightedList.map(t => t.id).join(',')}>
+          {highlightedList.map((topic) => {
+            const scale = calculateScale(topic, true);
+            return (
+              <mesh
+                key={topic.id}
+                position={[topic.x, topic.y, topic.z]}
+                scale={[scale, scale, scale]}
+                onClick={() => {
+                  console.log('[Highlighted] Clicked:', topic.label);
+                  onTopicClick?.(topic);
+                }}
+                onPointerOver={(e) => {
+                  e.stopPropagation();
+                  document.body.style.cursor = 'pointer';
+                }}
+                onPointerOut={() => {
+                  document.body.style.cursor = 'default';
+                }}
+              >
+                <sphereGeometry args={[1, 16, 16]} />
+                <meshStandardMaterial
+                  emissive={isDark ? "#ffffff" : '#0284c7'}
+                  emissiveIntensity={isDark ? 3.5 : 1.5}
+                  toneMapped={false}
+                />
+              </mesh>
+            );
+          })}
+        </group>
       )}
 
       {edgesToDisplay && edgesToDisplay.length > 0 && (
