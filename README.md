@@ -17,7 +17,7 @@ Ori automatically constructs a living knowledge graph from your browsing activit
 
 ## Demo
 
-|            Semantic Search             |            Graph Edges & Clusters             |
+|            Semantic Search             |                Graph Clusters                 |
 | :------------------------------------: | :-------------------------------------------: |
 | ![Semantic Search](.github/Search.gif) | ![Graph Clusters](.github/Edges&Clusters.gif) |
 
