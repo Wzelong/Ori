@@ -27,21 +27,31 @@ Ori automatically constructs a living knowledge graph from your browsing activit
 
 **Enable Built-in AI:**
 
-1. Open Chrome and navigate to:
+1. Open Chrome and enable these flags:
+
+   **Prompt API:**
    ```
    chrome://flags/#prompt-api-for-gemini-nano-multimodal-input
    ```
+   Set to **"Enabled"**
 
-2. Set to **"Enabled"** and click **"Relaunch"**
+   **Summarization API:**
+   ```
+   chrome://flags/#summarization-api-for-gemini-nano
+   ```
+   Set to **"Enabled"**
+
+2. Click **"Relaunch"** to restart Chrome
 
 3. Verify setup:
    - Go to `chrome://on-device-internals`
    - Check **Model Status** tab (model will auto-download if requirements are met)
    - Open DevTools Console (F12) and run:
      ```javascript
-     await ai.languageModel.availability()
+     await LanguageModel.availability()
+     await Summarizer.availability()
      ```
-   - Should return: `"available"`
+   - Both should return: `"available"` (or `"downloading"` on first use)
 
 ### Build and Load
 

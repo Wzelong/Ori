@@ -46,7 +46,13 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
   }, [])
 
   const getStatusColor = () => {
-    if (status.type === 'error') return 'bg-red-500'
+    if (status.type === 'error') {
+      // Show yellow/warning for downloadable state (needs action, not broken)
+      if (status.message.includes('ready to download') || status.message.includes('Click Extract')) {
+        return 'bg-yellow-500'
+      }
+      return 'bg-red-500'
+    }
     if (status.type === 'loading') return 'bg-yellow-500 animate-pulse'
     if (status.type === 'skipped') return 'bg-gray-400'
     if (status.type === 'success') return 'bg-green-500'
@@ -55,23 +61,72 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
 
   const getShortMessage = () => {
     if (status.type === 'skipped') return 'Skipped'
+    if (status.type === 'error') {
+      // Provide clearer messages for model-related errors
+      if (status.message.includes('downloading')) {
+        return 'AI models downloading...'
+      }
+      if (status.message.includes('ready to download')) {
+        return 'Click Extract to download'
+      }
+      if (status.message.includes('unavailable')) {
+        return 'AI models unavailable'
+      }
+      if (status.message.includes('Enable chrome://flags')) {
+        return 'Setup required'
+      }
+    }
     return status.message
+  }
+
+  const getTooltipMessage = () => {
+    if (status.type === 'error') {
+      if (status.message.includes('downloading') || status.message.includes('unavailable') || status.message.includes('chrome://flags') || status.message.includes('ready to download')) {
+        return status.message
+      }
+    }
+    return null
+  }
+
+  const isSetupPhase = () => {
+    // Hide badges only during initial setup, not during extraction
+    return (status.type === 'loading' && status.message.includes('Checking')) ||
+           (status.type === 'error' &&
+            (status.message.includes('Checking') ||
+             status.message.includes('downloading') ||
+             status.message.includes('unavailable') ||
+             status.message.includes('chrome://flags') ||
+             status.message.includes('ready to download')))
   }
 
   return (
     <TooltipProvider>
       <div className="px-4 py-2 border-b bg-muted/30">
         <div className="flex items-center justify-between gap-3">
-          {/* Status on left */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+          {/* Status - full width during setup, left-aligned when ready */}
+          <div className={`flex items-center gap-2 min-w-0 flex-1 transition-all duration-300`}>
             <div className={`h-2 w-2 rounded-full flex-shrink-0 transition-all duration-300 ${getStatusColor()}`} />
-            <span className="text-xs text-muted-foreground truncate">
-              {getShortMessage()}
-            </span>
+            {getTooltipMessage() ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs text-muted-foreground truncate cursor-help">
+                    {getShortMessage()}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start">
+                  <p className="max-w-xs">{getTooltipMessage()}</p>
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <span className="text-xs text-muted-foreground truncate">
+                {getShortMessage()}
+              </span>
+            )}
           </div>
 
-          {/* Stats badges on right */}
-          <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Stats badges on right - hidden during setup */}
+          {!isSetupPhase() && (
+            <div className="flex items-center gap-1.5 flex-shrink-0">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Badge variant="outline" className="h-5 px-2 text-xs font-normal flex items-center gap-1 cursor-default select-none">
@@ -144,6 +199,7 @@ export function StatsBar({ status, onEdgeClick, showingEdges, onTopicClick, show
               </TooltipContent>
             </Tooltip>
           </div>
+          )}
         </div>
       </div>
     </TooltipProvider>

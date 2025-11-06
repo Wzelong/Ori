@@ -33,7 +33,7 @@ interface StarsProps {
   onTopicClick?: (topic: TopicWithPosition) => void;
 }
 
-function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, clickable = false, onTopicClick }: StarsProps) {
+function Stars({ topics, colorFn, scaleFn, isDark, opacity = 1, clickable = false, onTopicClick }: StarsProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const count = topics.length;
   const [hovered, setHovered] = useState(false);
@@ -114,7 +114,7 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
   }, [positions, scales, colors, count, tempObj, tempColor, isDark, clickable, opacity]);
 
 
-  const handlePointerDown = (event: any) => {
+  const handlePointerDown = () => {
     if (clickable) {
       pointerDownTimeRef.current = Date.now();
     }
@@ -133,7 +133,7 @@ function Stars({ topics, colorFn, scaleFn, isDark, materialKey, opacity = 1, cli
     }
   };
 
-  const handlePointerOver = (event: any) => {
+  const handlePointerOver = () => {
     if (clickable) {
       setHovered(true);
     }
@@ -247,7 +247,7 @@ function AnimatedEdges({ lines }: AnimatedEdgesProps) {
     const currentTime = clock.getElapsedTime();
     let needsUpdate = false;
 
-    animationDataRef.current.forEach((data, i) => {
+    animationDataRef.current.forEach((data) => {
       const elapsed = currentTime - startTimeRef.current! - data.delay;
       if (elapsed < 0) return;
 

@@ -22,20 +22,27 @@ async function extractPageContent() {
     throw new Error('No valid web page tab found');
   }
 
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => ({
-      title: document.title,
-      url: window.location.href,
-      text: document.body.innerText
-    })
-  });
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => ({
+        title: document.title,
+        url: window.location.href,
+        text: document.body.innerText
+      })
+    });
 
-  if (!results[0]?.result) {
-    throw new Error('Failed to extract content');
+    if (!results[0]?.result) {
+      throw new Error('Failed to extract content');
+    }
+
+    return results[0].result;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Frame')) {
+      throw new Error('Page was closed or navigated away. Please try again.');
+    }
+    throw error;
   }
-
-  return results[0].result;
 }
 
 const VALIDATION_SCHEMA = {

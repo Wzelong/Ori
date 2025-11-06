@@ -50,6 +50,14 @@ export async function warmupModel(): Promise<void> {
   }
 }
 
+export async function checkAIAvailability(): Promise<{ success: boolean; error?: string }> {
+  const response = await chrome.runtime.sendMessage({
+    type: 'CHECK_AI_AVAILABILITY',
+  })
+
+  return response || { success: false, error: 'Failed to check AI availability' }
+}
+
 export async function computeSimilarityFromOffscreen(embeddings: Tensor): Promise<number[][]> {
   const shape = embeddings.dims as number[]
   const data = embeddings.data as Float32Array

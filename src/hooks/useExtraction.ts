@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { runPipeline } from '@/services/pipeline'
-import { warmupModel } from '@/llm/offscreenClient'
+import { warmupModel, checkAIAvailability } from '@/llm/offscreenClient'
 
 export type StatusState = {
   type: 'ready' | 'error' | 'loading' | 'skipped' | 'success'
@@ -10,17 +10,30 @@ export type StatusState = {
 export function useExtraction() {
   const [isExtracting, setIsExtracting] = useState(false)
   const [modelLoading, setModelLoading] = useState(true)
-  const [status, setStatus] = useState<StatusState>({ type: 'loading', message: 'Loading model...' })
+  const [status, setStatus] = useState<StatusState>({ type: 'loading', message: 'Checking AI models...' })
 
   useEffect(() => {
-    warmupModel()
+    // Check AI model availability first
+    checkAIAvailability()
+      .then((result) => {
+        if (!result.success) {
+          setModelLoading(false)
+          setStatus({ type: 'error', message: result.error || 'AI models not available' })
+          console.error('[ExtractControl] AI availability check failed:', result.error)
+          return Promise.reject(new Error(result.error))
+        }
+        // Then warm up embedding model
+        return warmupModel()
+      })
       .then(() => {
         setModelLoading(false)
         setStatus({ type: 'ready', message: 'Ready' })
       })
       .catch((err) => {
         setModelLoading(false)
-        setStatus({ type: 'error', message: err.message })
+        const message = err.message || 'Model initialization failed'
+        setStatus({ type: 'error', message })
+        console.error('[ExtractControl] Model initialization error:', err)
       })
 
     let timeoutId: NodeJS.Timeout | null = null
@@ -80,8 +93,11 @@ export function useExtraction() {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Unknown error'
       setStatus({ type: 'error', message: errorMsg })
-      setTimeout(() => setStatus({ type: 'ready', message: 'Ready' }), 5000)
       console.error('[ExtractControl] Error:', err)
+
+      // For model-related errors, show the error longer
+      const timeout = errorMsg.includes('downloading') || errorMsg.includes('unavailable') ? 10000 : 5000
+      setTimeout(() => setStatus({ type: 'ready', message: 'Ready' }), timeout)
     } finally {
       setIsExtracting(false)
       chrome.storage.local.set({ extractionStatus: 'idle' })

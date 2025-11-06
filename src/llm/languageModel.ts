@@ -8,25 +8,32 @@ export async function generateText(
   const availability = await (self as any).LanguageModel.availability();
 
   if (availability === 'unavailable') {
-    throw new Error('Language Model API is unavailable');
+    throw new Error('Language Model API is unavailable. Enable chrome://flags/#prompt-api-for-gemini-nano-multimodal-input');
+  }
+
+  if (availability === 'downloading') {
+    throw new Error('Language model is downloading (~1-2 GB). Please wait and try again.');
   }
 
   const initialPrompts = options?.systemPrompt
     ? [{ role: 'system', content: options.systemPrompt }]
     : [];
 
-  const session = await (self as any).LanguageModel.create({
-    initialPrompts,
-    temperature: 0.5,
-    topK: 1,
-    outputLanguage: "en"
-  });
+  try {
+    const session = await (self as any).LanguageModel.create({
+      initialPrompts,
+      temperature: 0.5,
+      topK: 1,
+      outputLanguage: "en"
+    });
+    return await session.prompt(userPrompt, options?.schema ? { responseConstraint: options.schema } : undefined);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('user gesture')) {
+      throw new Error('Model download requires user interaction. Click Extract to start download.');
+    }
+    throw error;
+  }
 
-  const promptOptions = options?.schema
-    ? { responseConstraint: options.schema }
-    : undefined;
-
-  return await session.prompt(userPrompt, promptOptions);
 }
 
 export async function generateTextStreaming(
@@ -38,19 +45,29 @@ export async function generateTextStreaming(
   const availability = await (self as any).LanguageModel.availability();
 
   if (availability === 'unavailable') {
-    throw new Error('Language Model API is unavailable');
+    throw new Error('Language Model API is unavailable. Enable chrome://flags/#prompt-api-for-gemini-nano-multimodal-input');
+  }
+
+  if (availability === 'downloading') {
+    throw new Error('Language model is downloading (~1-2 GB). Please wait and try again.');
   }
 
   const initialPrompts = options?.systemPrompt
     ? [{ role: 'system', content: options.systemPrompt }]
     : [];
 
-  const session = await (self as any).LanguageModel.create({
-    initialPrompts,
-    temperature: 0.5,
-    topK: 1,
-    outputLanguage: "en"
-  });
-
-  return session.promptStreaming(userPrompt);
+  try {
+    const session = await (self as any).LanguageModel.create({
+      initialPrompts,
+      temperature: 0.5,
+      topK: 1,
+      outputLanguage: "en"
+    });
+    return session.promptStreaming(userPrompt);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('user gesture')) {
+      throw new Error('Model download requires user interaction. Click Extract to start download.');
+    }
+    throw error;
+  }
 }
