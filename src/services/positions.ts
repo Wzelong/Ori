@@ -3,16 +3,16 @@ import { loadVector } from '../llm/embeddings';
 import { computeTopicPositions } from './dimensionality';
 import type { Topic } from '../types/schema';
 
-export async function recomputeAllTopicPositions(): Promise<void> {
+export async function recomputeAllTopicPositions(graphId: string): Promise<void> {
 
-  const topics = await db.topics.toArray();
+  const topics = await db.topics.where('graphId').equals(graphId).toArray();
 
   if (topics.length === 0) {
     return;
   }
 
   const embeddings = await Promise.all(
-    topics.map(t => loadVector(db, 'topic', t.id))
+    topics.map(t => loadVector(db, graphId, 'topic', t.id))
   );
 
   const validEmbeddings: number[][] = [];
@@ -26,7 +26,7 @@ export async function recomputeAllTopicPositions(): Promise<void> {
   }
 
 
-  const positions = await computeTopicPositions(validEmbeddings);
+  const positions = await computeTopicPositions(graphId, validEmbeddings);
 
   await db.transaction('rw', db.topics, async () => {
     for (let i = 0; i < validTopics.length; i++) {
@@ -39,8 +39,10 @@ export async function recomputeAllTopicPositions(): Promise<void> {
 
 }
 
-export async function shouldRecomputePositions(): Promise<boolean> {
+export async function shouldRecomputePositions(graphId: string): Promise<boolean> {
   const topicsWithoutPositions = await db.topics
+    .where('graphId')
+    .equals(graphId)
     .filter(t => t.x === undefined || t.y === undefined || t.z === undefined)
     .count();
 

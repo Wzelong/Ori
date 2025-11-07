@@ -2,6 +2,8 @@ import { extractPageResultFromData } from '../services/extract'
 import { insertPageResult } from '../services/insert'
 import { isUrlExcluded } from '../lib/urlExclusions'
 import { db } from '../db/database'
+import { getCurrentGraphId, initializeGraphs } from '../services/graphManager'
+import { EXTRACTION } from '../config/constants'
 
 // =============================================================================
 // OFFSCREEN DOCUMENT - Hosts embedding model in persistent DOM context
@@ -35,6 +37,8 @@ async function ensureOffscreenDocument() {
 async function initializeExtension() {
   await ensureOffscreenDocument()
 
+  await initializeGraphs()
+
   setTimeout(() => {
     chrome.runtime.sendMessage({ type: 'WARMUP_MODEL' }).catch(() => {})
   }, 100)
@@ -49,8 +53,8 @@ chrome.runtime.onStartup.addListener(initializeExtension)
 // AUTO-EXTRACTION - Trigger extraction on tab events when enabled
 // =============================================================================
 
-const DEBOUNCE_DELAY = 2000
-const DUPLICATE_WINDOW = 60000
+const DEBOUNCE_DELAY = EXTRACTION.AUTO_EXTRACT_DEBOUNCE_MS
+const DUPLICATE_WINDOW = EXTRACTION.DUPLICATE_DETECTION_WINDOW_MS
 
 const extractionHistory = new Map<number, { url: string; timestamp: number }>()
 
@@ -190,7 +194,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           return
         }
 
-        const existing = await db.items.where('link').equals(url).first()
+        const graphId = await getCurrentGraphId()
+        if (!graphId) {
+          resetExtractionStatus()
+          sendResponse({ success: false, error: 'No active graph selected' })
+          return
+        }
+
+        const existing = await db.items.where({ graphId, link: url }).first()
         if (existing) {
           resetExtractionStatus()
           sendResponse({ success: false, error: 'Page already extracted' })
@@ -198,7 +209,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
 
         const pageResult = await extractPageResultFromData(message.pageData)
-        const item = await insertPageResult(pageResult)
+        const item = await insertPageResult(graphId, pageResult)
         resetExtractionStatus()
         sendResponse({ success: true, itemId: item?.id })
       } catch (error) {

@@ -1,13 +1,14 @@
 import { UMAP } from 'umap-js';
 import { mean, subtract, covarianceMatrix, eigenDecomposition, normalize3D } from './vectorUtils';
 import { getSettings } from './settings';
+import { DIMENSIONALITY } from '../config/constants';
 
 interface PCAResult {
   components: number[][];
   mean: number[];
 }
 
-export function pca(vectors: number[][], numComponents: number = 100): PCAResult {
+export function pca(vectors: number[][], numComponents: number = DIMENSIONALITY.PCA_COMPONENTS): PCAResult {
   if (vectors.length === 0) {
     throw new Error('Cannot perform PCA on empty dataset');
   }
@@ -39,7 +40,7 @@ export function umap(
 
   const umap = new UMAP({
     nComponents,
-    nNeighbors: Math.min(15, Math.floor(vectors.length / 2)),
+    nNeighbors: Math.min(DIMENSIONALITY.UMAP_NEIGHBORS, Math.floor(vectors.length / 2)),
     minDist,
     spread
   });
@@ -47,7 +48,7 @@ export function umap(
   return umap.fit(vectors);
 }
 
-export async function computeTopicPositions(embeddings: number[][]): Promise<number[][]> {
+export async function computeTopicPositions(graphId: string, embeddings: number[][]): Promise<number[][]> {
   if (embeddings.length === 0) {
     return [];
   }
@@ -56,14 +57,14 @@ export async function computeTopicPositions(embeddings: number[][]): Promise<num
     return embeddings.map((_, i) => [i * 5, 0, 0]);
   }
 
-  const settings = await getSettings();
+  const settings = await getSettings(graphId);
 
-  const pcaResult = pca(embeddings, 100);
+  const pcaResult = pca(embeddings, DIMENSIONALITY.PCA_COMPONENTS);
   const reduced = embeddings.map(emb => projectPCA(emb, pcaResult));
 
   const positions3D = umap(
     reduced,
-    3,
+    DIMENSIONALITY.UMAP_TARGET_DIMENSIONS,
     settings.graph.umapMinDist,
     settings.graph.umapSpread
   );

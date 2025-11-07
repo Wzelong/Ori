@@ -17,7 +17,11 @@ type GraphContext = {
   colMap: Map<string, number>;
 };
 
-
+/**
+ * Finds the best match in a similarity array
+ * @param similarities - Array of similarity scores
+ * @returns Index and similarity of best match
+ */
 function findBestMatch(similarities: number[]): { index: number; similarity: number } {
   let bestIdx = -1, bestSim = 0;
   for (let i = 0; i < similarities.length; i++) {
@@ -29,8 +33,71 @@ function findBestMatch(similarities: number[]): { index: number; similarity: num
   return { index: bestIdx, similarity: bestSim };
 }
 
+/**
+ * Attempts to merge a topic with existing topics based on similarity
+ * @param label - Topic label to resolve
+ * @param index - Index in the similarity matrix
+ * @param existingTopics - Already persisted topics
+ * @param similarityMatrix - Matrix of topic similarities
+ * @param mergeThreshold - Minimum similarity for merging
+ * @param resolvedSoFar - Topics already resolved in this batch
+ * @returns Matched topic (existing or new) and whether it's new
+ */
+function findSimilarTopic(
+  graphId: string,
+  label: string,
+  index: number,
+  existingTopics: Topic[],
+  similarityMatrix: number[][],
+  mergeThreshold: number,
+  resolvedSoFar: Topic[]
+): { topic: Topic; isNew: boolean } {
+  // Check for exact label match first
+  const exactMatch = existingTopics.find(t => t.label === label);
+  if (exactMatch) {
+    return { topic: { ...exactMatch, uses: exactMatch.uses + 1 }, isNew: false };
+  }
 
+  // Check similarity with topics resolved in this batch
+  const newTopicSimilarities = similarityMatrix[index].slice(0, index);
+  const bestNewMatch = findBestMatch(newTopicSimilarities);
+
+  if (bestNewMatch.index >= 0 && bestNewMatch.similarity > mergeThreshold) {
+    const existingResolved = resolvedSoFar[bestNewMatch.index];
+    return { topic: { ...existingResolved, uses: existingResolved.uses + 1 }, isNew: false };
+  }
+
+  // If no existing topics, create new
+  if (existingTopics.length === 0) {
+    const newTopic: Topic = { id: crypto.randomUUID(), graphId, label, uses: 1, createdAt: Date.now() };
+    return { topic: newTopic, isNew: true };
+  }
+
+  // Check similarity with existing persisted topics
+  const existingSimilarities = similarityMatrix[index].slice(resolvedSoFar.length);
+  const bestExisting = findBestMatch(existingSimilarities);
+
+  if (bestExisting.index >= 0 && bestExisting.similarity > mergeThreshold) {
+    const match = existingTopics[bestExisting.index];
+    return { topic: { ...match, uses: match.uses + 1 }, isNew: false };
+  }
+
+  // No match found, create new topic
+  const newTopic: Topic = { id: crypto.randomUUID(), graphId, label, uses: 1, createdAt: Date.now() };
+  return { topic: newTopic, isNew: true };
+}
+
+/**
+ * Resolves new topic labels by merging with similar existing topics or creating new ones
+ * Uses semantic similarity to prevent duplicate topics
+ * @param topics - Array of topic labels to resolve
+ * @param existingTopics - Already persisted topics in database
+ * @param similarityMatrix - Precomputed similarity matrix
+ * @param mergeThreshold - Minimum similarity threshold for merging (typically 0.85)
+ * @returns Resolved topics and mapping of new topic IDs to their matrix indices
+ */
 function resolveTopics(
+  graphId: string,
   topics: string[],
   existingTopics: Topic[],
   similarityMatrix: number[][],
@@ -40,64 +107,58 @@ function resolveTopics(
   const newIndices = new Map<string, number>();
 
   topics.forEach((label, i) => {
-    const exactMatch = existingTopics.find(t => t.label === label);
-    if (exactMatch) {
-      resolved.push({ ...exactMatch, uses: exactMatch.uses + 1 });
-      return;
-    }
+    const { topic, isNew } = findSimilarTopic(
+      graphId,
+      label,
+      i,
+      existingTopics,
+      similarityMatrix,
+      mergeThreshold,
+      resolved
+    );
 
-    const newTopicSimilarities = similarityMatrix[i].slice(0, i);
-    const bestNewMatch = findBestMatch(newTopicSimilarities);
+    resolved.push(topic);
 
-    if (bestNewMatch.index >= 0 && bestNewMatch.similarity > mergeThreshold) {
-      const existingResolved = resolved[bestNewMatch.index];
-      resolved.push({ ...existingResolved, uses: existingResolved.uses + 1 });
-      return;
-    }
-
-    if (existingTopics.length === 0) {
-      const newTopic: Topic = { id: crypto.randomUUID(), label, uses: 1, createdAt: Date.now() };
-      resolved.push(newTopic);
-      newIndices.set(newTopic.id, i);
-      return;
-    }
-
-    const similarities = similarityMatrix[i].slice(topics.length);
-    const best = findBestMatch(similarities);
-
-
-    if (best.index >= 0 && best.similarity > mergeThreshold) {
-      const match = existingTopics[best.index];
-      resolved.push({ ...match, uses: match.uses + 1 });
-    } else {
-      const newTopic: Topic = { id: crypto.randomUUID(), label, uses: 1, createdAt: Date.now() };
-      resolved.push(newTopic);
-      newIndices.set(newTopic.id, i);
+    if (isNew) {
+      newIndices.set(topic.id, i);
     }
   });
 
   return { resolved, newIndices };
 }
 
-async function linkItemTopics(itemId: string, topicIds: string[]) {
+/**
+ * Links an item to its associated topics in the junction table
+ * @param graphId - Graph ID
+ * @param itemId - ID of the item
+ * @param topicIds - Array of topic IDs to link
+ */
+async function linkItemTopics(graphId: string, itemId: string, topicIds: string[]): Promise<void> {
   for (const topicId of topicIds) {
-    const existing = await db.item_topic.get([itemId, topicId]);
+    const existing = await db.item_topic.get([graphId, itemId, topicId]);
     if (!existing) {
-      await db.item_topic.add({ itemId, topicId });
+      await db.item_topic.add({ graphId, itemId, topicId });
     }
   }
 }
 
-
+/**
+ * Gets all potential neighbor topics for a new topic, sorted by similarity
+ * @param matrixRow - Row index in similarity matrix for the new topic
+ * @param ctx - Graph context with existing and newly created topics
+ * @returns Array of neighbors with similarity scores, sorted descending
+ */
 function getNeighbors(matrixRow: number, ctx: GraphContext): Neighbor[] {
   const neighbors: Neighbor[] = [];
 
+  // Add newly created topics from this batch
   ctx.createdTopics.forEach(({ topic, row }) => {
     if (row < matrixRow) {
       neighbors.push({ topic, similarity: ctx.matrix[matrixRow][row] });
     }
   });
 
+  // Add existing topics from database
   ctx.existingTopics.forEach(topic => {
     const col = ctx.colMap.get(topic.id)!;
     neighbors.push({ topic, similarity: ctx.matrix[matrixRow][col] });
@@ -106,7 +167,32 @@ function getNeighbors(matrixRow: number, ctx: GraphContext): Neighbor[] {
   return neighbors.sort((a, b) => b.similarity - a.similarity);
 }
 
+/**
+ * Checks if a node has room for more edges (respects max edges constraint)
+ * @param nodeId - ID of the node to check
+ * @param edges - All edges in the graph
+ * @param maxEdgesPerNode - Maximum allowed edges per node
+ * @returns True if node can accept more edges
+ */
+function canAcceptMoreEdges(nodeId: string, edges: EdgeData[], maxEdgesPerNode: number): boolean {
+  const edgeCount = edges.reduce((count, edge) =>
+    count + (edge.src === nodeId || edge.dst === nodeId ? 1 : 0), 0
+  );
+  return edgeCount < maxEdgesPerNode;
+}
+
+/**
+ * Computes edges for a newly created topic using MST-style incremental construction
+ * Applies constraints: minimum similarity, max edges per node, no duplicate connections
+ * @param newTopic - The newly created topic
+ * @param matrixRow - Row index in similarity matrix
+ * @param ctx - Graph context with all topics and existing edges
+ * @param edgeMinSimilarity - Minimum similarity threshold for creating edges
+ * @param maxEdgesPerNode - Maximum edges allowed per node
+ * @returns Array of new edges to be added to the graph
+ */
 function computeEdges(
+  graphId: string,
   newTopic: Topic,
   matrixRow: number,
   ctx: GraphContext,
@@ -116,70 +202,159 @@ function computeEdges(
   const neighbors = getNeighbors(matrixRow, ctx);
   const candidates = neighbors.filter(n => n.similarity >= edgeMinSimilarity);
 
+  // Track which nodes are already connected to the new topic
   const connectedNodes = new Set<string>();
   ctx.allEdges.forEach(edge => {
     if (edge.src === newTopic.id) connectedNodes.add(edge.dst);
     if (edge.dst === newTopic.id) connectedNodes.add(edge.src);
   });
 
-  const neighborEdgeCounts = new Map<string, number>();
-  ctx.allEdges.forEach(edge => {
-    neighborEdgeCounts.set(edge.src, (neighborEdgeCounts.get(edge.src) || 0) + 1);
-    neighborEdgeCounts.set(edge.dst, (neighborEdgeCounts.get(edge.dst) || 0) + 1);
-  });
-
   const edges: EdgeData[] = [];
   let edgeCount = 0;
 
   for (const neighbor of candidates) {
+    // Stop if new topic has reached max edges
     if (edgeCount >= maxEdgesPerNode) break;
+
+    // Skip if already connected
     if (connectedNodes.has(neighbor.topic.id)) continue;
 
-    const neighborCurrentEdges = neighborEdgeCounts.get(neighbor.topic.id) || 0;
-    if (neighborCurrentEdges >= maxEdgesPerNode) continue;
+    // Skip if neighbor has reached max edges
+    if (!canAcceptMoreEdges(neighbor.topic.id, ctx.allEdges, maxEdgesPerNode)) continue;
 
+    // Create edge (sorted IDs for consistency)
     const [src, dst] = [newTopic.id, neighbor.topic.id].sort();
-    edges.push({ src, dst, similarity: neighbor.similarity });
+    edges.push({ graphId, src, dst, similarity: neighbor.similarity });
+
     connectedNodes.add(neighbor.topic.id);
-    neighborEdgeCounts.set(neighbor.topic.id, neighborCurrentEdges + 1);
     edgeCount++;
   }
 
   return edges;
 }
 
-export async function insertPageResult(pageResult: PageResult): Promise<Item | null> {
+/**
+ * Computes similarity matrix for topic embeddings
+ * @param newEmbeddings - Embeddings for new topics
+ * @param existingEmbeddings - Embeddings for existing topics
+ * @returns Similarity matrix as 2D array
+ */
+async function computeSimilarityMatrix(
+  newEmbeddings: number[][],
+  existingEmbeddings: number[][]
+): Promise<number[][]> {
+  return await computeSimilarityFromOffscreen(
+    new Tensor('float32', [...newEmbeddings, ...existingEmbeddings].flat(), [
+      newEmbeddings.length + existingEmbeddings.length,
+      newEmbeddings[0]?.length || 0
+    ])
+  );
+}
+
+/**
+ * Persists topics, edges, and item to database within a transaction
+ * @param graphId - Graph ID
+ * @param pageResult - Extracted page data
+ * @param resolved - Resolved topic list
+ * @param newIndices - Mapping of new topic IDs to embedding indices
+ * @param newEdges - Edges to add
+ * @returns Created item
+ */
+async function persistToDatabase(
+  graphId: string,
+  pageResult: PageResult,
+  resolved: Topic[],
+  newIndices: Map<string, number>,
+  newEdges: EdgeData[]
+): Promise<Item> {
+  return await db.transaction('rw', [db.items, db.topics, db.item_topic, db.topic_edges, db.vectors], async () => {
+    // Create item
+    const item: Item = {
+      id: crypto.randomUUID(),
+      graphId,
+      title: pageResult.title,
+      summary: pageResult.summary,
+      link: pageResult.link,
+      createdAt: Date.now()
+    };
+    await db.items.add(item);
+
+    // Store item embedding
+    if (pageResult.contentEmbedding) {
+      await storeVector(db, graphId, 'item', item.id, pageResult.contentEmbedding);
+    }
+
+    // Update or create topics
+    for (const topic of resolved) {
+      const existing = await db.topics.get(topic.id);
+      if (existing) {
+        await db.topics.update(topic.id, { uses: existing.uses + 1 });
+      } else {
+        await db.topics.add(topic);
+        const row = newIndices.get(topic.id);
+        if (row !== undefined && pageResult.topicEmbeddings) {
+          await storeVector(db, graphId, 'topic', topic.id, pageResult.topicEmbeddings[row]);
+        }
+      }
+    }
+
+    // Link item to topics
+    await linkItemTopics(graphId, item.id, resolved.map(t => t.id));
+
+    // Add edges
+    for (const edge of newEdges) {
+      const exists = await db.topic_edges.where('[graphId+src+dst]').equals([graphId, edge.src, edge.dst]).first();
+      if (!exists) {
+        await db.topic_edges.add({ ...edge, id: crypto.randomUUID(), createdAt: Date.now() });
+      }
+    }
+
+    return item;
+  });
+}
+
+/**
+ * Inserts a page result into the knowledge graph
+ * Handles topic resolution, edge computation, and incremental graph construction
+ * @param graphId - Graph ID to insert into
+ * @param pageResult - Extracted page data with topics, embeddings, and content
+ * @returns Created item or null if duplicate
+ * @throws Error if insertion fails
+ */
+export async function insertPageResult(graphId: string, pageResult: PageResult): Promise<Item | null> {
   try {
-    if (await db.items.where('link').equals(pageResult.link).first()) {
+    // Check for duplicate within this graph
+    if (await db.items.where({ graphId, link: pageResult.link }).first()) {
       return null;
     }
 
-    const settings = await getSettings();
-
+    const settings = await getSettings(graphId);
     const newEmbeddings = pageResult.topicEmbeddings || [];
-    const existingTopics = await db.topics.toArray();
+    const existingTopics = await db.topics.where('graphId').equals(graphId).toArray();
+
+    // Load existing embeddings
     const existingEmbeddings = (await Promise.all(
-      existingTopics.map(t => loadVector(db, 'topic', t.id))
+      existingTopics.map(t => loadVector(db, graphId, 'topic', t.id))
     )) as number[][];
 
-    const matrix = await computeSimilarityFromOffscreen(
-      new Tensor('float32', [...newEmbeddings, ...existingEmbeddings].flat(), [
-        newEmbeddings.length + existingEmbeddings.length,
-        newEmbeddings[0]?.length || 0
-      ])
-    );
+    // Compute similarity matrix for topic matching
+    const matrix = await computeSimilarityMatrix(newEmbeddings, existingEmbeddings);
 
+    // Resolve topics (merge with existing or create new)
     const { resolved, newIndices } = resolveTopics(
+      graphId,
       pageResult.topics,
       existingTopics,
       matrix,
       settings.graph.topicMergeThreshold
     );
 
+    // Initialize graph context for edge computation
     const ctx: GraphContext = {
       existingTopics,
       createdTopics: [],
-      allEdges: (await db.topic_edges.toArray()).map(e => ({
+      allEdges: (await db.topic_edges.where('graphId').equals(graphId).toArray()).map(e => ({
+        graphId: e.graphId,
         src: e.src,
         dst: e.dst,
         similarity: e.similarity
@@ -188,12 +363,14 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
       colMap: new Map(existingTopics.map((t, i) => [t.id, newEmbeddings.length + i]))
     };
 
+    // Compute edges for new topics only
     const newTopics = resolved.filter(t => t.uses === 1);
 
     for (const topic of newTopics) {
       const row = newIndices.get(topic.id);
       if (row !== undefined) {
         const edges = computeEdges(
+          graphId,
           topic,
           row,
           ctx,
@@ -205,58 +382,25 @@ export async function insertPageResult(pageResult: PageResult): Promise<Item | n
       }
     }
 
-    const newEdges = ctx.allEdges.slice((await db.topic_edges.count()));
+    const newEdges = ctx.allEdges.slice((await db.topic_edges.where('graphId').equals(graphId).count()));
 
-    return await db.transaction('rw', [db.items, db.topics, db.item_topic, db.topic_edges, db.vectors], async () => {
-      const item: Item = {
-        id: crypto.randomUUID(),
-        title: pageResult.title,
-        summary: pageResult.summary,
-        link: pageResult.link,
-        createdAt: Date.now()
-      };
-      await db.items.add(item);
+    // Persist everything to database
+    const item = await persistToDatabase(graphId, pageResult, resolved, newIndices, newEdges);
 
-      if (pageResult.contentEmbedding) {
-        await storeVector(db, 'item', item.id, pageResult.contentEmbedding);
-      }
+    // Trigger async position recomputation if new topics were added
+    if (newTopics.length > 0) {
+      setTimeout(() => {
+        recomputeAllTopicPositions(graphId).catch(err =>
+          console.error('[insert] Position recomputation failed:', err)
+        );
+      }, 0);
+    }
 
-      for (const topic of resolved) {
-        const existing = await db.topics.get(topic.id);
-        if (existing) {
-          await db.topics.update(topic.id, { uses: existing.uses + 1 });
-        } else {
-          await db.topics.add(topic);
-          const row = newIndices.get(topic.id);
-          if (row !== undefined) {
-            await storeVector(db, 'topic', topic.id, newEmbeddings[row]);
-          }
-        }
-      }
+    // Update last insertion timestamp
+    const timestamp = Date.now();
+    chrome.storage.local.set({ lastInsertionTime: timestamp });
 
-      await linkItemTopics(item.id, resolved.map(t => t.id));
-
-      for (const edge of newEdges) {
-        const exists = await db.topic_edges.where('[src+dst]').equals([edge.src, edge.dst]).first();
-        if (!exists) {
-          await db.topic_edges.add({ ...edge, id: crypto.randomUUID(), createdAt: Date.now() });
-        }
-      }
-
-
-      if (newTopics.length > 0) {
-        setTimeout(() => {
-          recomputeAllTopicPositions().catch(err =>
-            console.error('[insert] Position recomputation failed:', err)
-          );
-        }, 0);
-      }
-
-      const timestamp = Date.now();
-      chrome.storage.local.set({ lastInsertionTime: timestamp });
-
-      return item;
-    });
+    return item;
   } catch (error) {
     console.error('[insert] Error:', error);
     throw error;

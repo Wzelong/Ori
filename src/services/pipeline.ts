@@ -2,6 +2,7 @@ import { extractPageResult } from './extract';
 import { insertPageResult } from './insert';
 import { db } from '../db/database';
 import { isUrlExcluded } from '../lib/urlExclusions';
+import { getCurrentGraphId } from './graphManager';
 
 async function getActiveTabUrl(): Promise<string> {
   const isExtensionPage = typeof window !== 'undefined' &&
@@ -32,14 +33,19 @@ export async function runPipeline(): Promise<boolean> {
     return false;
   }
 
-  const existing = await db.items.where('link').equals(currentUrl).first();
+  const graphId = await getCurrentGraphId();
+  if (!graphId) {
+    throw new Error('No active graph selected');
+  }
+
+  const existing = await db.items.where({ graphId, link: currentUrl }).first();
   if (existing) {
     return false;
   }
 
   const pageResult = await extractPageResult();
 
-  await insertPageResult(pageResult);
+  await insertPageResult(graphId, pageResult);
 
   return true;
 }
