@@ -595,6 +595,7 @@ function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
   const [opacity, setOpacity] = useState(0);
   const mountedRef = useRef(false);
   const position: [number, number, number] = [topic.x, topic.y - 0.6, topic.z];
+  const fontSize = useMemo(() => 11 * (window.devicePixelRatio || 1), []);
 
   useEffect(() => {
     if (!mountedRef.current) {
@@ -627,7 +628,7 @@ function StaticLabel({ topic, textColor, isDark }: StaticLabelProps) {
     >
       <div style={{
         color: textColor,
-        fontSize: '11px',
+        fontSize: `${fontSize}px`,
         fontWeight: 700,
         whiteSpace: 'nowrap',
         textShadow: isDark
@@ -651,6 +652,7 @@ function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) 
   const [opacity, setOpacity] = useState(0);
   const startTimeRef = useRef<number | null>(null);
   const position: [number, number, number] = [topic.x, topic.y - 0.6, topic.z];
+  const fontSize = useMemo(() => 11 * (window.devicePixelRatio || 1), []);
 
   useFrame(({ clock }) => {
     if (startTimeRef.current === null) {
@@ -685,7 +687,7 @@ function AnimatedLabel({ topic, textColor, isDark, delay }: AnimatedLabelProps) 
     >
       <div style={{
         color: textColor,
-        fontSize: '11px',
+        fontSize: `${fontSize}px`,
         fontWeight: 700,
         whiteSpace: 'nowrap',
         textShadow: isDark
