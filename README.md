@@ -68,7 +68,7 @@ Ori automatically constructs a living knowledge graph from your browsing activit
 ### Build and Load
 
 ```bash
-git clone https://github.com/yourusername/ori.git
+git clone https://github.com/Wzelong/Ori
 cd ori
 npm install
 npm run build
