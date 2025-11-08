@@ -1,4 +1,4 @@
-import { ExtractControl } from '@/components/ExtractControl'
+import { ExtractControl } from './components/ExtractControl'
 import { GraphStats } from './components/GraphStats'
 import { StatusFooter } from './components/StatusFooter'
 import { ThemeToggle } from '@/components/ThemeToggle'

@@ -34,29 +34,22 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
 };
 
-const SETTINGS_KEY_PREFIX = 'graph_settings_';
+const SETTINGS_KEY = 'app_settings';
 
-function getSettingsKey(graphId: string): string {
-  return `${SETTINGS_KEY_PREFIX}${graphId}`;
-}
-
-export async function getSettings(graphId: string): Promise<AppSettings> {
-  const key = getSettingsKey(graphId);
-  const result = await chrome.storage.sync.get(key);
-  if (result[key]) {
-    return { ...DEFAULT_SETTINGS, ...result[key] };
+export async function getSettings(): Promise<AppSettings> {
+  const result = await chrome.storage.sync.get(SETTINGS_KEY);
+  if (result[SETTINGS_KEY]) {
+    return { ...DEFAULT_SETTINGS, ...result[SETTINGS_KEY] };
   }
   return DEFAULT_SETTINGS;
 }
 
-export async function saveSettings(graphId: string, settings: AppSettings): Promise<void> {
-  const key = getSettingsKey(graphId);
-  await chrome.storage.sync.set({ [key]: settings });
+export async function saveSettings(settings: AppSettings): Promise<void> {
+  await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
 }
 
-export async function resetSettings(graphId: string): Promise<void> {
-  const key = getSettingsKey(graphId);
-  await chrome.storage.sync.set({ [key]: DEFAULT_SETTINGS });
+export async function resetSettings(): Promise<void> {
+  await chrome.storage.sync.set({ [SETTINGS_KEY]: DEFAULT_SETTINGS });
 }
 
 export type SettingsChangeType = 'graph' | 'umap' | 'search' | 'none';

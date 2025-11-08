@@ -59,13 +59,11 @@ export async function getEmbeddings(
 
 export async function storeVector(
   db: any,
-  graphId: string,
   ownerType: 'item' | 'topic',
   ownerId: string,
   embedding: number[]
 ) {
   await db.vectors.put({
-    graphId,
     ownerType,
     ownerId,
     buf: arrayToArrayBuffer(embedding),
@@ -75,10 +73,9 @@ export async function storeVector(
 
 export async function loadVector(
   db: any,
-  graphId: string,
   ownerType: 'item' | 'topic',
   ownerId: string
 ): Promise<number[] | null> {
-  const row = await db.vectors.get([graphId, ownerType, ownerId]);
+  const row = await db.vectors.get([ownerType, ownerId]);
   return row ? arrayBufferToArray(row.buf) : null;
 }

@@ -1,18 +1,17 @@
 import { useState, useEffect } from 'react'
-import { ExtractControl } from '@/components/ExtractControl'
+import { ExtractControl } from '@/popup/components/ExtractControl'
 import { useExtraction } from '@/hooks/useExtraction'
 import { ViewSelector } from './components/ViewSelector'
-import { ThemeToggle } from '@/components/ThemeToggle'
+import { DeleteDatabaseButton } from './components/DeleteDatabaseButton'
+import { ThemeToggle } from './components/ThemeToggle'
 import { StatsBar } from './components/StatsBar'
 import { ExploreInput } from './components/ExploreInput'
 import { ItemCard } from './components/ItemCard'
 import { InspectView } from './components/InspectView'
 import { ConfigureView } from './components/ConfigureView'
-import { GraphView } from './components/GraphView'
 import { InsightStream } from './components/InsightStream'
 import { StarMap } from '@/components/StarMap'
-import { db, ORION_GRAPH_ID } from '@/db/database'
-import { getLastUsedGraphId, setCurrentGraphId } from '@/services/graphManager'
+import { db } from '@/db/database'
 import type { TopicWithPosition, TopicEdge, Item } from '@/types/schema'
 import type { TopicSearchResult } from '@/services/search'
 import { getItemsForTopic } from '@/services/graph'
@@ -20,8 +19,7 @@ import { performRAGSearch } from '@/services/searchOrchestrator'
 
 export default function App() {
   const extraction = useExtraction()
-  const [view, setView] = useState<'explore' | 'inspect' | 'configure' | 'graphs'>('explore')
-  const [graphId, setGraphId] = useState<string>(ORION_GRAPH_ID)
+  const [view, setView] = useState<'explore' | 'inspect' | 'configure'>('explore')
   const [topics, setTopics] = useState<TopicWithPosition[]>([])
   const [highlightedTopics, setHighlightedTopics] = useState<TopicSearchResult[] | undefined>()
   const [edges, setEdges] = useState<TopicEdge[] | undefined>()
@@ -37,14 +35,8 @@ export default function App() {
   const [flashMessage, setFlashMessage] = useState<{ type: 'success' | 'error', message: string } | null>(null)
 
   useEffect(() => {
-    getLastUsedGraphId().then(id => setGraphId(id))
-  }, [])
-
-  useEffect(() => {
-    if (!graphId) return
-
     const loadTopics = async () => {
-      const allTopics = await db.topics.where('graphId').equals(graphId).toArray()
+      const allTopics = await db.topics.toArray()
       const withPositions = allTopics.filter(
         (t): t is TopicWithPosition =>
           t.x !== undefined && t.y !== undefined && t.z !== undefined
@@ -57,7 +49,7 @@ export default function App() {
     const interval = setInterval(loadTopics, 2000)
 
     const listener = (changes: { [key: string]: chrome.storage.StorageChange }) => {
-      if (changes.lastInsertionTime || changes.current_graph_id) {
+      if (changes.lastInsertionTime) {
         loadTopics()
       }
     }
@@ -67,7 +59,7 @@ export default function App() {
       clearInterval(interval)
       chrome.storage.onChanged.removeListener(listener)
     }
-  }, [graphId])
+  }, [])
 
   useEffect(() => {
     if (highlightedTopics && highlightedTopics.length > 0) {
@@ -95,7 +87,7 @@ export default function App() {
         throw new Error(response?.error || 'Failed to get embedding')
       }
 
-      const result = await performRAGSearch(graphId, response.embedding, query, topics)
+      const result = await performRAGSearch(response.embedding, query, topics)
 
       setHighlightedTopics(result.highlightedTopics)
       setEdges(result.edges)
@@ -130,7 +122,7 @@ export default function App() {
 
   const handleTopicClick = async (topic: TopicWithPosition) => {
     setSelectedTopic(topic)
-    const items = await getItemsForTopic(graphId, topic.id)
+    const items = await getItemsForTopic(topic.id)
     setTopicItems(items)
   }
 
@@ -148,7 +140,7 @@ export default function App() {
       setHighlightedTopics(undefined)
       setShowingAllEdges(false)
     } else {
-      const allEdges = await db.topic_edges.where('graphId').equals(graphId).toArray()
+      const allEdges = await db.topic_edges.toArray()
       setEdges(allEdges)
       setShowingAllEdges(true)
       setShowingClusters(false)
@@ -177,12 +169,6 @@ export default function App() {
     setFlashMessage({ type, message })
   }
 
-  const handleGraphSwitch = async (newGraphId: string) => {
-    await setCurrentGraphId(newGraphId)
-    setGraphId(newGraphId)
-    setView('explore')
-  }
-
   useEffect(() => {
     if (flashMessage) {
       const timer = setTimeout(() => {
@@ -199,10 +185,11 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-background">
       <header className="flex items-center justify-between px-4 py-2.5 border-b">
-        <ViewSelector graphId={graphId} value={view} onValueChange={setView} />
+        <ViewSelector value={view} onValueChange={setView} />
         <div className="flex items-center gap-1.5">
           <ExtractControl extraction={extraction} compact />
           <ThemeToggle />
+          <DeleteDatabaseButton />
         </div>
       </header>
 
@@ -222,7 +209,6 @@ export default function App() {
           <>
             <div className="absolute inset-0">
               <StarMap
-                graphId={graphId}
                 topics={topics}
                 highlightedTopics={highlightedTopics}
                 edges={edges}
@@ -264,11 +250,9 @@ export default function App() {
             </div>
           </>
         ) : view === 'inspect' ? (
-          <InspectView graphId={graphId} />
-        ) : view === 'configure' ? (
-          <ConfigureView graphId={graphId} onFlash={showFlash} />
+          <InspectView />
         ) : (
-          <GraphView onGraphSwitch={handleGraphSwitch} />
+          <ConfigureView onFlash={showFlash} />
         )}
       </div>
     </div>

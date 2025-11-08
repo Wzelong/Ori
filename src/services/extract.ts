@@ -2,19 +2,7 @@ import { summarize } from '../llm/summarizer';
 import { generateText } from '../llm/languageModel';
 import { getEmbeddingFromOffscreen, getEmbeddingsFromOffscreen } from '../llm/offscreenClient';
 import type { PageResult } from '../types/schema';
-import { EXTRACTION, METADATA } from '../config/constants';
-import {
-  CONTENT_VALIDATION_PROMPT,
-  METADATA_EXTRACTION_PROMPT,
-  createValidationUserPrompt,
-  createMetadataUserPrompt
-} from '../config/prompts';
 
-/**
- * Extracts content from the current web page
- * @returns Page content including title, URL, and text
- * @throws {Error} If no valid web page tab is found or extraction fails
- */
 async function extractPageContent() {
   const isExtensionPage = typeof window !== 'undefined' &&
     window.location.href.startsWith('chrome-extension://');
@@ -67,19 +55,34 @@ const VALIDATION_SCHEMA = {
   required: ['isValid', 'reason']
 };
 
-/**
- * Validates if page content is worth processing using LLM-based quality assessment
- * @param text - Page text content
- * @param url - Page URL for context
- * @returns Validation result with boolean flag and reason
- */
 async function validateContentQuality(text: string, url: string): Promise<{ isValid: boolean; reason: string }> {
-  const sampleText = text.slice(0, EXTRACTION.VALIDATION_SAMPLE_LENGTH);
+  const sampleText = text.slice(0, 3000);
 
   const validationJson = await generateText(
-    createValidationUserPrompt(url, sampleText),
+    `URL: ${url}\n\nContent preview:\n${sampleText}`,
     {
-      systemPrompt: CONTENT_VALIDATION_PROMPT,
+      systemPrompt: `You are a content quality validator. Determine if this page contains valuable content worth processing.
+
+REJECT (isValid: false) if the page is:
+- Search result pages (Google, Bing, Google Scholar, etc.)
+- Directory/listing pages (index pages, file listings, navigation pages)
+- Login/authentication pages (sign-in forms, auth pages)
+- Error pages (404, 500, access denied)
+- Pages with minimal or no substantial content
+- Aggregated links without original content
+
+ACCEPT (isValid: true) if the page has:
+- Substantial article content (blog posts, articles, documentation, research papers)
+- Educational/informational value (tutorials, guides, explanations)
+- Structured information with clear topics/sections
+- Original content (not just metadata or links)
+
+Return JSON with:
+- isValid: boolean (true if content should be processed)
+- reason: string (brief explanation of decision)
+- confidence: number (0-1, how confident you are)
+
+Be strict - when in doubt, reject.`,
       schema: VALIDATION_SCHEMA
     }
   );
@@ -95,93 +98,147 @@ const METADATA_SCHEMA = {
     topics: {
       type: 'array',
       items: { type: 'string' },
-      minItems: METADATA.MIN_TOPICS_PER_PAGE,
-      maxItems: METADATA.MAX_TOPICS_PER_PAGE
+      minItems: 2,
+      maxItems: 4
     }
   },
   required: ['title', 'topics']
 };
 
-/**
- * Extracts metadata (title and topics) from page summary using LLM
- * @param summary - Summarized page content
- * @param originalTitle - Original page title for context
- * @returns Metadata object with refined title and extracted topics
- */
-async function extractMetadata(summary: string, originalTitle: string): Promise<{ title: string; topics: string[] }> {
-  const metadataJson = await generateText(
-    createMetadataUserPrompt(originalTitle, summary),
-    {
-      systemPrompt: METADATA_EXTRACTION_PROMPT,
-      schema: METADATA_SCHEMA
-    }
-  );
+export async function extractPageResultFromData(pageData: { title: string; url: string; text: string }): Promise<PageResult> {
+  // 1. Use provided page content
+  const extracted = pageData;
 
-  return JSON.parse(metadataJson);
-}
-
-/**
- * Generates embeddings for topics and content summary
- * @param topics - Array of topic strings
- * @param summary - Content summary text
- * @param title - Page title
- * @returns Object containing topic embeddings array and content embedding
- */
-async function generateEmbeddings(
-  topics: string[],
-  summary: string,
-  title: string
-): Promise<{ topicEmbeddings: number[][]; contentEmbedding: number[] }> {
-  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(topics, 'doc');
-  const topicEmbeddings = topicEmbeddingsTensor.tolist() as number[][];
-  const contentEmbedding = await getEmbeddingFromOffscreen(summary, 'doc', title);
-
-  return { topicEmbeddings, contentEmbedding };
-}
-
-/**
- * Processes page data through the full extraction pipeline
- * @param pageData - Raw page data (title, URL, text)
- * @returns Complete PageResult with all extracted metadata and embeddings
- * @throws {Error} If content validation fails
- */
-async function processPageData(pageData: { title: string; url: string; text: string }): Promise<PageResult> {
-  const validation = await validateContentQuality(pageData.text, pageData.url);
+  // 2. Validate content quality
+  const validation = await validateContentQuality(extracted.text, extracted.url);
   if (!validation.isValid) {
     throw new Error(`Content validation failed: ${validation.reason}`);
   }
 
-  const summarizerText = pageData.text.slice(0, EXTRACTION.SUMMARIZER_MAX_LENGTH);
+  const summarizerText = extracted.text.slice(0, 15000);
+
+  // 3. Generate summary
   const summary = await summarize(summarizerText);
-  const metadata = await extractMetadata(summary, pageData.title);
-  const { topicEmbeddings, contentEmbedding } = await generateEmbeddings(metadata.topics, summary, metadata.title);
+
+  // 4. Extract topics from summary
+  const userPrompt = `Original title: ${extracted.title}
+
+Summary:
+${summary}`;
+
+  const metadataJson = await generateText(
+    userPrompt,
+    {
+      systemPrompt: `You extract concise, high-quality metadata from summarized web text.
+Return JSON ONLY with this schema:
+{"title": "...", "topics": ["core-concept", "related-1", "related-2", "related-3"]}
+
+Rules:
+TITLE
+- Keep short, clear, and descriptive (≤12 words).
+- Remove source/site names, dates, and extra punctuation.
+
+TOPICS (2–4 total)
+Extract topics in this order:
+1. FIRST topic: The single most important SPECIFIC concept this page is fundamentally about
+   - NOT a broad field like "Artificial Intelligence" or "Quantum Mechanics"
+   - The CORE subject the page focuses on
+2. REMAINING topics (2–3): Related concepts that explore depth and breadth from the given summary
+   - Context, applications, related techniques, or closely connected concepts
+
+For each topic:
+- Short noun phrase (1–4 words), lowercase, singular form
+- Expand abbreviations and acronyms (e.g., "LLM" → "large language model")
+- Avoid adjectives like "novel", "improved", "efficient"
+
+Return clean, valid JSON only.
+`,
+      schema: METADATA_SCHEMA
+    }
+  );
+
+  const metadata = JSON.parse(metadataJson);
+
+  // 5. Create embeddings
+  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(metadata.topics, 'doc');
+  const topicEmbeddings = topicEmbeddingsTensor.tolist() as number[][];
+  const contentEmbedding = await getEmbeddingFromOffscreen(summary, 'doc', metadata.title);
 
   return {
     title: metadata.title,
     summary,
     topics: metadata.topics,
-    link: pageData.url,
+    link: extracted.url,
     topicEmbeddings,
     contentEmbedding
   };
 }
 
-/**
- * Extracts and processes page result from provided page data
- * @param pageData - Raw page data (title, URL, text)
- * @returns Complete PageResult with extracted metadata and embeddings
- * @throws {Error} If content validation fails
- */
-export async function extractPageResultFromData(pageData: { title: string; url: string; text: string }): Promise<PageResult> {
-  return processPageData(pageData);
-}
-
-/**
- * Extracts and processes page result from the current active tab
- * @returns Complete PageResult with extracted metadata and embeddings
- * @throws {Error} If page extraction or content validation fails
- */
 export async function extractPageResult(): Promise<PageResult> {
+  // 1. Extract page content
   const extracted = await extractPageContent();
-  return processPageData(extracted);
+
+  // 2. Validate content quality
+  const validation = await validateContentQuality(extracted.text, extracted.url);
+  if (!validation.isValid) {
+    throw new Error(`Content validation failed: ${validation.reason}`);
+  }
+
+  const summarizerText = extracted.text.slice(0, 15000);
+
+  // 3. Generate summary
+  const summary = await summarize(summarizerText);
+
+  // 4. Extract topics from summary
+  const userPrompt = `Original title: ${extracted.title}
+
+Summary:
+${summary}`;
+
+  const metadataJson = await generateText(
+    userPrompt,
+    {
+      systemPrompt: `You extract concise, high-quality metadata from summarized web text.
+Return JSON ONLY with this schema:
+{"title": "...", "topics": ["core-concept", "related-1", "related-2", "related-3"]}
+
+Rules:
+TITLE
+- Keep short, clear, and descriptive (≤12 words).
+- Remove source/site names, dates, and extra punctuation.
+
+TOPICS (2–4 total)
+Extract topics in this order:
+1. FIRST topic: The single most important SPECIFIC concept this page is fundamentally about
+   - NOT a broad field like "Artificial Intelligence" or "Quantum Mechanics"
+   - The CORE subject the page focuses on
+2. REMAINING topics (2–3): Related concepts that explore depth and breadth from the given summary
+   - Context, applications, related techniques, or closely connected concepts
+
+For each topic:
+- Short noun phrase (1–4 words), lowercase, singular form
+- Expand abbreviations and acronyms (e.g., "LLM" → "large language model")
+- Avoid adjectives like "novel", "improved", "efficient"
+
+Return clean, valid JSON only.
+`,
+      schema: METADATA_SCHEMA
+    }
+  );
+
+  const metadata = JSON.parse(metadataJson);
+
+  // 5. Create embeddings
+  const topicEmbeddingsTensor = await getEmbeddingsFromOffscreen(metadata.topics, 'doc');
+  const topicEmbeddings = topicEmbeddingsTensor.tolist() as number[][];
+  const contentEmbedding = await getEmbeddingFromOffscreen(summary, 'doc', metadata.title);
+
+  return {
+    title: metadata.title,
+    summary,
+    topics: metadata.topics,
+    link: extracted.url,
+    topicEmbeddings,
+    contentEmbedding
+  };
 }

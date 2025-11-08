@@ -4,7 +4,6 @@ import { generateTextStreaming } from '@/llm/languageModel'
 import { getSettings } from './settings'
 import type { TopicSearchResult, ItemSearchResult } from './search'
 import type { TopicWithPosition, TopicEdge, Item } from '@/types/schema'
-import { RAG_SYSTEM_PROMPT, createRAGUserPrompt } from '@/config/prompts'
 
 export interface SearchResult {
   highlightedTopics: TopicSearchResult[]
@@ -23,13 +22,12 @@ export interface SearchOptions {
 }
 
 export async function performRAGSearch(
-  graphId: string,
   queryEmbedding: number[],
   query: string,
   allTopics: TopicWithPosition[],
   options: SearchOptions = {}
 ): Promise<SearchResult> {
-  const settings = await getSettings(graphId);
+  const settings = await getSettings();
 
   const DEFAULT_OPTIONS: Required<SearchOptions> = {
     topicCount: settings.search.topicResultCount,
@@ -43,19 +41,19 @@ export async function performRAGSearch(
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
   const [topicResults, itemResults] = await Promise.all([
-    findSimilarTopics(graphId, queryEmbedding, opts.topicCount, opts.topicThreshold),
-    findSimilarItems(graphId, queryEmbedding, opts.itemCount, opts.itemThreshold)
+    findSimilarTopics(queryEmbedding, opts.topicCount, opts.topicThreshold),
+    findSimilarItems(queryEmbedding, opts.itemCount, opts.itemThreshold)
   ])
 
   const highlightedTopics = opts.expandNeighbors
-    ? await expandTopicsWithNeighbors(graphId, topicResults, allTopics)
+    ? await expandTopicsWithNeighbors(topicResults, allTopics)
     : topicResults
 
   const edges = highlightedTopics.length > 0
-    ? await filterRelevantEdges(graphId, highlightedTopics, opts.maxEdges)
+    ? await filterRelevantEdges(highlightedTopics, opts.maxEdges)
     : []
 
-  const itemsWithSimilarity = await collectSearchItems(graphId, topicResults, itemResults)
+  const itemsWithSimilarity = await collectSearchItems(topicResults, itemResults)
 
   const { stream, itemMap } = await generateInsight(query, topicResults, itemsWithSimilarity)
 
@@ -73,7 +71,6 @@ interface ItemWithSimilarity {
 }
 
 async function collectSearchItems(
-  graphId: string,
   topicResults: TopicSearchResult[],
   itemResults: ItemSearchResult[]
 ): Promise<ItemWithSimilarity[]> {
@@ -86,7 +83,7 @@ async function collectSearchItems(
   })
 
   if (topicResults.length > 0) {
-    const topicItems = await getItemsForTopics(graphId, topicResults.map(r => r.topic.id))
+    const topicItems = await getItemsForTopics(topicResults.map(r => r.topic.id))
     topicItems.forEach(item => {
       if (!itemMap.has(item.id)) {
         itemMap.set(item.id, item)
@@ -120,8 +117,67 @@ async function generateInsight(
     }
   })
 
-  const userPrompt = createRAGUserPrompt(query, topicLabels, itemsJson)
-  const stream = await generateTextStreaming(userPrompt, { systemPrompt: RAG_SYSTEM_PROMPT })
+  const userPrompt = `User Input:
+${query}
+
+Related_Topics (array; may be empty):
+${JSON.stringify(topicLabels)}
+
+Related_Pages (array; may be empty):
+${JSON.stringify(itemsJson, null, 2)}
+
+Reply concise. MAX 3 sentences.
+`
+
+  const systemPrompt = `You are Ori — a calm, succinct research guide living inside a graph UI.
+Your job: respond ONLY using the provided Related_Topics and Related_Pages.
+Do NOT invent facts or titles. No emojis.
+
+INPUT FORMAT (examples):
+User Input:
+<matrix factorization in recommender systems>
+
+Related_Topics (array; may be empty):
+["Collaborative Filtering", "SVD", "Implicit Feedback"]
+
+Related_Pages (array; may be empty):
+[
+  {"id":"i_001","title":"A Tutorial on Matrix Factorization","summary":"..."},
+  {"id":"i_002","title":"Implicit Feedback CF","summary":"..."}
+]
+
+OUTPUT RULES:
+1) Start with ONE concise sentence in Ori’s voice reporting what you found:
+   - e.g., "Found 3 related topics and 2 pages." or "Explored 0 topics and 2 pages."
+   - The model may vary the verb ("Found", "Explored", "Surfaced") but must keep it to one sentence.
+
+2) Then respond according to availability, using ONLY allowed sources:
+   - Both present (topics + pages): Give a short, helpful answer (MAX 2 concise sentences) grounded ONLY in Related_Pages' summaries.
+     Citations MUST come immediately after the sentence period with NO spaces, parentheses, or commas.
+     Format: "This is a sentence.**p1** Another sentence.**p2****p3**"
+     RIGHT: "sentence.**p1**" or "sentence.**p1****p2**"
+   - No topics, pages present: Inform that topics were not found and answer from pages as above; end with **id**.
+   - Topics present, no pages: Inform that pages were not found; DO NOT answer with topic-only facts.
+     Instead, suggest next actions (see Rule 3).
+   - Neither present: Say there's no material to answer, or no related resources found (Try to say it in Ori's way). Then suggest user to try a narrower query or add more sources via the Extract button (mention "Extract" without bold formatting).
+
+3) When suggesting actions (only when helpful), use full page titles verbatim WITHOUT citations:
+   - Use **title** format for page titles (becomes clickable link)
+   - NEVER EVER add **pN** citations after action suggestions
+   - Citations (**p1**, **p2**, etc.) are ONLY for factual claims in your answer, NOT for action suggestions
+   - CORRECT examples:
+     - "Review **A Tutorial on Matrix Factorization** for a step-by-step overview."
+     - "Open **Implicit Feedback CF** to see handling of non-explicit signals."
+   - Action suggestions = NO citations. Factual claims = YES citations.
+
+4) Tone & style:
+   - Ori’s voice = passionate about knowledge, goofy, nerdy, concise, friendly.
+   - No bullet lists.
+   - Keep total length tight.
+
+**Important**: your response should have MAX 3 sentences.`
+
+  const stream = await generateTextStreaming(userPrompt, { systemPrompt })
 
   return { stream, itemMap }
 }

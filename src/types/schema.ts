@@ -9,16 +9,8 @@ export interface PageResult {
 
 // Graph Database Types
 
-export interface Graph {
-  id: string;
-  name: string;
-  createdAt: number;
-  isDefault: boolean;
-}
-
 export interface Topic {
   id: string;
-  graphId: string;
   label: string;
   uses: number;      // denormalized count of linked items
   createdAt: number;
@@ -29,7 +21,6 @@ export interface Topic {
 
 export interface Item {
   id: string;
-  graphId: string;
   title: string;
   summary: string;
   link: string;
@@ -37,14 +28,12 @@ export interface Item {
 }
 
 export interface ItemTopic {
-  graphId: string;
   itemId: string;
   topicId: string;
 }
 
 export interface TopicEdge {
   id: string;
-  graphId: string;
   src: string;
   dst: string;
   similarity: number;
@@ -52,7 +41,6 @@ export interface TopicEdge {
 }
 
 export interface VectorRow {
-  graphId: string;
   ownerType: 'item' | 'topic';
   ownerId: string;
   buf: ArrayBuffer;

@@ -28,11 +28,7 @@ import type { Topic, Item } from '@/types/schema'
 type FilterMode = 'topics' | 'items'
 type SortField = 'createdAt' | 'uses'
 
-interface InspectViewProps {
-  graphId: string
-}
-
-export function InspectView({ graphId }: InspectViewProps) {
+export function InspectView() {
   const [filterMode, setFilterMode] = useState<FilterMode>('topics')
   const [sortField, setSortField] = useState<SortField>('createdAt')
   const [searchQuery, setSearchQuery] = useState('')
@@ -45,12 +41,10 @@ export function InspectView({ graphId }: InspectViewProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
 
   useEffect(() => {
-    if (!graphId) return
-
     const loadData = async () => {
       const [allTopics, allItems] = await Promise.all([
-        db.topics.where('graphId').equals(graphId).toArray(),
-        db.items.where('graphId').equals(graphId).toArray()
+        db.topics.toArray(),
+        db.items.toArray()
       ])
       setTopics(allTopics)
       setItems(allItems)
@@ -71,7 +65,7 @@ export function InspectView({ graphId }: InspectViewProps) {
       clearInterval(interval)
       chrome.storage.onChanged.removeListener(listener)
     }
-  }, [graphId])
+  }, [])
 
   const filteredAndSortedTopics = useMemo(() => {
     let filtered = topics
@@ -137,9 +131,9 @@ export function InspectView({ graphId }: InspectViewProps) {
   const handleDelete = async () => {
     const idsToDelete = Array.from(selectedIds)
     if (filterMode === 'topics') {
-      await deleteMultipleTopics(graphId, idsToDelete)
+      await deleteMultipleTopics(idsToDelete)
     } else {
-      await deleteMultipleItems(graphId, idsToDelete)
+      await deleteMultipleItems(idsToDelete)
     }
     setSelectedIds(new Set())
     setShowDeleteDialog(false)

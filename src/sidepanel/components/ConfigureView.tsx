@@ -12,11 +12,10 @@ import type { AppSettings } from '@/services/settings'
 import { Info } from 'lucide-react'
 
 interface ConfigureViewProps {
-  graphId: string
   onFlash: (type: 'success' | 'error', message: string) => void
 }
 
-export function ConfigureView({ graphId, onFlash }: ConfigureViewProps) {
+export function ConfigureView({ onFlash }: ConfigureViewProps) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [originalSettings, setOriginalSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
   const [isLoading, setIsLoading] = useState(true)
@@ -24,10 +23,8 @@ export function ConfigureView({ graphId, onFlash }: ConfigureViewProps) {
   const [hasChanges, setHasChanges] = useState(false)
 
   useEffect(() => {
-    if (graphId) {
-      loadSettings()
-    }
-  }, [graphId])
+    loadSettings()
+  }, [])
 
   useEffect(() => {
     const changed = JSON.stringify(settings) !== JSON.stringify(originalSettings)
@@ -36,7 +33,7 @@ export function ConfigureView({ graphId, onFlash }: ConfigureViewProps) {
 
   const loadSettings = async () => {
     setIsLoading(true)
-    const loaded = await getSettings(graphId)
+    const loaded = await getSettings()
     setSettings(loaded)
     setOriginalSettings(loaded)
     setIsLoading(false)
@@ -51,10 +48,10 @@ export function ConfigureView({ graphId, onFlash }: ConfigureViewProps) {
     try {
       const changeType = detectChanges(originalSettings, settings)
 
-      await saveSettings(graphId, settings)
+      await saveSettings(settings)
 
       if (changeType === 'graph' || changeType === 'umap') {
-        await recomputeAllTopicPositions(graphId)
+        await recomputeAllTopicPositions()
       }
 
       setOriginalSettings(settings)

@@ -21,18 +21,17 @@ export interface ClusterWithEdges extends ClusterInfo {
 }
 
 export async function identifyClusters(
-  graphId: string,
   topics: TopicWithPosition[],
   resolution?: number,
   minClusterSize?: number
 ): Promise<ClusterInfo[]> {
   if (topics.length < 2) return [];
 
-  const settings = await getSettings(graphId);
+  const settings = await getSettings();
   const actualResolution = resolution ?? settings.graph.clusterResolution;
   const actualMinClusterSize = minClusterSize ?? settings.graph.minClusterSize;
 
-  const allEdges = await db.topic_edges.where('graphId').equals(graphId).toArray();
+  const allEdges = await db.topic_edges.toArray();
   const topicIds = new Set(topics.map(t => t.id));
 
   const graphEdges = allEdges
@@ -75,7 +74,7 @@ export async function identifyClusters(
 
   for (const [clusterId, memberIds] of clusterEntries) {
     const memberEmbeddings = await Promise.all(
-      memberIds.map(id => loadVector(db, graphId, 'topic', id))
+      memberIds.map(id => loadVector(db, 'topic', id))
     );
 
     const validMembers: string[] = [];
